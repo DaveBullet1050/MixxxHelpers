@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='utf-8'?>
+<MixxxControllerPreset mixxxVersion="2.0" schemaVersion="1"> <!-- Schema version number to help compatibility, should the MIDI format change -->
+    <info>
+        <name>beatItAutoDJ</name>
+        <author>Dave Bullet</author>
+        <description>Rate and beat matching for smoother transitions in AutoDJ in Mixxx.  Tested on Mixxx v2.5.6</description>
+        <wiki>https://mixxx.discourse.group/t/auto-dj-extension-for-beatmatching-and-harmonic-mixing/15962</wiki>
+        <forums>https://mixxx.discourse.group/t/auto-dj-extension-for-beatmatching-and-harmonic-mixing/15962</forums>
+    </info>
+
+    <controller id="beatItAutoDJ">
+            <scriptfiles>
+                <file filename="beatItAutoDJ-scripts.js" functionprefix="beatItAutoDJ"/>
+            </scriptfiles>
+    </controller>
+</MixxxControllerPreset>
