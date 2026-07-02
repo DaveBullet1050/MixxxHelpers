@@ -1,6 +1,6 @@
 # Sending a command to Mixxx
 
-On Linux, the easiest way is to map a shortcut key then use SSH to send the keystroke.  For example, say you want to cause AutoDJ to transition to the next track via your phone?  
+On Linux, the easiest way is to send one of Mixxx's preconfigured shortcut keys via xdotool to the app, which you can call from SSH or a script to send the keystroke.  For example, say you're at a party and sick of the current song and want to cause AutoDJ to transition to the next track via your phone.  
 
 I use "SSH button" on Android, but any SSH client will do.  
 
