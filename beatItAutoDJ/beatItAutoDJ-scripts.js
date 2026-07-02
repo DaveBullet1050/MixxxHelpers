@@ -7,7 +7,10 @@ function beatItAutoDJ() {}
 	License: GPLv2 or GPLv3, at your discretion and risk
 	 Author: Dave Bullet, 2026-06-30
 	    	Credit to: Sophia Herzog, 2016-2017, Stephen Larroque, 2021 (original script and lowbass transition option)
-	 Script version: v0.1
+	 Change history:
+	 	v0.1 - 2026-06-30 - Initial version
+		v0.2 - 2026-07-02 - Added bpm tolerance to skip tracks not in bpmTolerance range (with a max number of skips)
+							so it doesn't loop forever
 	 Mixxx version: v.2.5.6
 
 	Overview:
@@ -68,6 +71,11 @@ function beatItAutoDJ() {}
 */
 
 // User Variables
+var bpmTolerance = 10;		// +/- difference in BPM between adjacent tracks.  If the next track is outside this range
+							// it is skipped, loading the next track (in the hope it is closer).
+							// Set to zero if you don't want a tolerance (i.e. no skipping at all)
+var maxBpmToleranceSkips = 5;	// How many tracks will be skipped to find a close enough bpm tolerance track, before just
+								// grabbing the next one (a crude way to stop infinite skipping)
 var bassChangeRate = 0.01;     // Decide how fast the bass knob should turn left on the current deck
 							// while transitioning.  Sounds cleaner than 2 tracks playing bass beats
 							// even though they are beat matched.  0.01 provides a gradual roll off
@@ -78,12 +86,14 @@ var bassChangeRate = 0.01;     // Decide how fast the bass knob should turn left
 var debug = false;
 
 // Working globals
-var crossFaderConnection, deck1Connection, deck2Connection;
+var crossFaderConnection, channel1TrackLoaded, channel2TrackLoaded
 var fadingActive = false;
 var remainingIterations = 0, recheckBeat = 0;
-var currDeck, nextDeck, currChannel, nextChannel, ndRateRange, cdRateRange, fadeProgress, fOrB;
-var ndRateDelta, ndNewRate, cdRateDelta, cdNewRate, cdBeatDistance, ndBeatDistance, phaseGap;
+var beatDelta;
+var currDeck, nextDeck, currChannel, nextChannel, ndRateRange, cdRateRange, fadeProgress, fOrB, isEvaluating;
+var ndRateDelta, ndNewRate, cdRateDelta, cdNewRate, cdBeatDistance, ndBeatDistance, phaseGap, currSkips;
 var cdFileBPM, ndFileBPM, ndTargetRate, ndRateStepSize, cdTargetRate, cdRateStepSize, fadeStart;
+var currChannelEq,checkTrackLoadedTimer, bassZeroed, trackLoaded, cdFilterLow;
 
 beatItAutoDJ.init = function() {
 	// Initialise the script.  Enable options to help beat matching
@@ -102,14 +112,14 @@ beatItAutoDJ.init = function() {
 
 	// 1. Listen for whenever a track finishes loading onto Deck 1 or Deck 2, so we disable things
 	// that AutoDJ will interfere with (We want total control!)
-    deck1Connection = engine.makeConnection("[Channel1]", "track_loaded", beatItAutoDJ.onTrackLoaded);
-    deck2Connection = engine.makeConnection("[Channel2]", "track_loaded", beatItAutoDJ.onTrackLoaded);
+    channel1TrackLoaded = engine.makeConnection("[Channel1]", "track_loaded", beatItAutoDJ.onTrackLoaded);
+    channel2TrackLoaded = engine.makeConnection("[Channel2]", "track_loaded", beatItAutoDJ.onTrackLoaded);
 };
 
 beatItAutoDJ.shutdown = function() { // Called by Mixxx - cleanup engine connections gracefully
 	crossFaderConnection.disconnect();
-	deck1Connection.disconnect();
-    deck2Connection.disconnect();
+	channel1TrackLoaded.disconnect();
+	channel2TrackLoaded.disconnect();
 };
 
 beatItAutoDJ.debug = function(message) {
@@ -126,6 +136,7 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 		beatItAutoDJ.debug("currDeck: " + currDeck);
 		beatItAutoDJ.debug("nextDeck: " + nextDeck);
 		currChannel = "[Channel"+currDeck+"]";
+		currChannelEq = "[EqualizerRack1_[Channel" + currDeck + "]_Effect1]";
 		nextChannel = "[Channel"+nextDeck+"]";
 
 		// Used to determine the relative rate increase/decrease to apply below (as a percentage away from fade start)
@@ -228,35 +239,98 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 
 	// FADE OUT CURRENT TRACK BASS
 	// ===========================
-
 	if (!bassZeroed && bassChangeRate > 0) {
-		cdFilterLow = engine.getValue(currChannel, "filterLow");
+		cdFilterLow = engine.getValue(currChannelEq, "parameter1");
 		if (cdFilterLow > 0) {
-			if (cdFilterLow - this.bassChangeRate < 0) {
-				engine.setValue(currChannel, "filterLow", 0)
+			if (cdFilterLow - bassChangeRate < 0) {
+				engine.setValue(currChannelEq, "parameter1", 0)
 				bassZeroed = true;
 			} else {
-				engine.setValue(currChannel, "filterLow", cdFilterLow - bassChangeRate);
+				engine.setValue(currChannelEq, "parameter1", cdFilterLow - bassChangeRate);
 			}
 		}
 	}
-	// Check if crossfader has reached the other side. If so, reset fading for next track change
+	// Check if crossfader has reached the other side. If so, reset fading and bass level for next track change
 	fadingActive = Math.abs(value) == 1 ? false : true;
-	if (!fadingActive && bassChangeRate > 0) {
-		engine.setValue(currChannel, "filterLow", 1)
-	}
+	if (!fadingActive && bassChangeRate > 0) engine.setValue(currChannelEq, "parameter1", 1);
+}
+
+beatItAutoDJ.getPlayingChannel = function() {
+    if (engine.getValue("[Channel1]", "play") === 1) return "[Channel1]";
+    if (engine.getValue("[Channel2]", "play") === 1) return "[Channel2]";
+    return null; // Return null if everything is paused
+};
+
+beatItAutoDJ.getWaitingChannel = function(playingChannel) {
+	return (playingChannel == currChannel) ? nextChannel : currChannel;
+}
+
+beatItAutoDJ.checkBpmAndSkip = function(playingChannel, waitingChannel, checkCount) {
+	var currentBpm = engine.getValue(playingChannel, "file_bpm");
+	var upcomingBpm = engine.getValue(waitingChannel, "file_bpm");
+	beatItAutoDJ.debug("currentBpm: " + currentBpm);
+	beatItAutoDJ.debug("upcomingBpm: " + upcomingBpm);
+
+    // If Mixxx hasn't populated the track loaded file_bpm yet, defer execution and check again
+    if ((upcomingBpm == cdFileBPM) && (currentBpm == ndFileBPM)) {
+        checkCount++;
+        if (checkCount < 15) { // Timeout safety gate (roughly 450ms total)
+            
+            // Mixxx's engine.beginTimer supports passing arguments to the callback function!
+            engine.beginTimer(30, function() {
+                beatItAutoDJ.checkBpmAndSkip(playingChannel, waitingChannel, checkCount);
+            }, true);
+            
+        } else {
+            beatItAutoDJ.debug("Match Timeout. No metadata found. Safety unlocking.");
+        }
+        return;
+    }
+
+    // See if the new track is within bpmToleranec
+    var bpmDiff = Math.abs(currentBpm - upcomingBpm);
+    if (bpmDiff <= bpmTolerance) {
+        beatItAutoDJ.debug("Match found! Loaded " + upcomingBpm + " BPM against " + currentBpm + " BPM.");
+        currSkips = 0; 
+		isEvaluating = false; // Lift lock for next transition window
+        return;
+    }
+
+    // CIRCUIT BREAKER PROTECTION
+    if (currSkips >= maxBpmToleranceSkips) {
+		beatItAutoDJ.debug("Beyond tolerance and run out of skips.");
+        currSkips = 0; // Reset for next transition window
+        isEvaluating = false;
+        return;
+    }
+
+    // FAILURE SUB-ROUTINE
+    beatItAutoDJ.debug("Rejecting " + upcomingBpm + " BPM (Diff: " + bpmDiff.toFixed(1) + "). Against " +
+			currentBpm + " BPM. Issuing skip sequence....");
+    currSkips++;
+
+    // Shift skip execution out of the current synchronous thread stack frame
+    engine.beginTimer(20, function() {
+        engine.setValue("[AutoDJ]", "skip_next", 1);
+        
+        // Release lock strictly *after* Mixxx handles data array processing
+        engine.beginTimer(30, function() {
+            isEvaluating = false;
+        }, true);
+    }, true);
+	// Store the BPMs for the tracks just loaded. We'll use them to ensure if this is called again
+	// we wait until they change (confirming new track load is complete for BPM diff comparison)
+	cdFileBPM = upcomingBpm;
+	ndFileBPM = currentBpm;
 }
 
 /**
  * Event listener that intercepts Auto DJ right as a track lands on a deck.
  */
 beatItAutoDJ.onTrackLoaded = function(value, group, key) {
-    // value === 1 means a track just finished loading into the target deck group
-    if (value === 1) {
-        // 2. Kill the sync lock so Auto DJ cannot anchor or manipulate the tempo
-        engine.setValue(group, "sync_enabled", 0);
-        
-        // 3. Instantly reset the pitch slider back to normal absolute 0% speed change
-        engine.setValue(group, "rate", 0.0);
-    }
+    // Prevent thread collision if we are already handling a skip lifecycle
+	if ((value !== 1) ||  isEvaluating || (bpmTolerance == 0) || !nextChannel || !currChannel) return;
+
+	isEvaluating = true;
+	beatItAutoDJ.checkBpmAndSkip(nextChannel, currChannel, 0);
 }
