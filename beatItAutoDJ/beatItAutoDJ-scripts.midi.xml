@@ -7,7 +7,6 @@
         <wiki>https://mixxx.discourse.group/t/auto-dj-extension-for-beatmatching-and-harmonic-mixing/15962</wiki>
         <forums>https://mixxx.discourse.group/t/auto-dj-extension-for-beatmatching-and-harmonic-mixing/15962</forums>
     </info>
-
     <controller id="beatItAutoDJ">
             <scriptfiles>
                 <file filename="beatItAutoDJ-scripts.js" functionprefix="beatItAutoDJ"/>

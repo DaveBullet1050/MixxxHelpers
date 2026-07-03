@@ -11,7 +11,12 @@ function beatItAutoDJ() {}
 	 	v0.1 - 2026-06-30 - Initial version
 		v0.2 - 2026-07-02 - Added bpm tolerance to skip tracks not in bpmTolerance range (with a max number of skips)
 							so it doesn't loop forever
+		v0.3 - 2026-07-03 - Resync beats on first crossfade movement (rather than wait) and resyncs every 3 cycles (smoother)
+						  - Beat syncing switches to from incoming to outgoing channel, so any mistakes aren't as audible as it is fading out
+						  - Tweaked beatsync bands to be exactly in the middle
+						  - Added bass boost (disabled by default) to help bass "weak" tracks as was common in the 70s and 80s
 	 Mixxx version: v.2.5.6
+	 Repo: https://github.com/DaveBullet1050/MixxxHelpers
 
 	Overview:
 	---------
@@ -22,11 +27,12 @@ function beatItAutoDJ() {}
 	So they both play at the same rate. The script then slowly increases (or decreases) the tempo of both tracks to reach the target speed of the next deck's track.
 	The script maintains pitch during rate changes and checks for beat alignment, adjusting beat as necessary.
 
-	Changes to this script are dynamic in Mixxx.  Save and Mixxx instantly reloads.  Start mixxx with:
-	mixxx --developer
-	in order to view the Options -> Developer Tools to view any script errors / log (or tail -f ~/.mixxx/mixxx.log)
-	Developer mode is NOT require for normal use (just debugging!)
+	This script does contain user changeable behaviour.  Change variable values under the section:
+	// User Variables
+	below
 
+	Changes to this script are dynamic in Mixxx.  Save and Mixxx instantly reloads.
+	
 	Recommended AutoDJ / mixxx settings:
 	------------------------------------
 	Duration of transition: 15 seconds.  Anything will work, but this seems reasonable.
@@ -40,6 +46,11 @@ function beatItAutoDJ() {}
 	If you are playing Mixxx over VNC/Remote desktop and encounter CPU peaks/audio stutters, increase:
 	Options -> Sound hardware -> Audio buffer: 92.9msec
 	(Note: the above is not due to this script, but just general latency/load)
+
+	This script assumes every track has BPM metadata.  To do this, 
+	Make sure you analyse every track in your AutoDJ playlist (or your full your library.
+	You can do this by selecting all tracks (in AutoDJ list or full library) without a BPM value and 
+	right click -> Analyse -> Analyse)
 
 	System setup (Linux users):
 	------------------------
@@ -71,10 +82,14 @@ function beatItAutoDJ() {}
 */
 
 // User Variables
-var bpmTolerance = 10;		// +/- difference in BPM between adjacent tracks.  If the next track is outside this range
+// ==============
+// You can change these at any time. Saving this file will automatically trigger a reload by Mixxx (i.e 
+// no need to restart Mixxx)
+var bpmTolerance = 0;		// +/- difference in BPM between adjacent tracks.  If the next track is outside this range
 							// it is skipped, loading the next track (in the hope it is closer).
-							// Set to zero if you don't want a tolerance (i.e. no skipping at all)
-var maxBpmToleranceSkips = 5;	// How many tracks will be skipped to find a close enough bpm tolerance track, before just
+							// A good number is probably 10 - 15
+							// Set this to zero if you don't want a tolerance (i.e. do not skip any tracks, play in order loaded)
+var maxBpmToleranceSkips = 5;	// Only if bpmTolerance > 0, how many tracks will be skipped to find a close enough bpm tolerance track, before just
 								// grabbing the next one (a crude way to stop infinite skipping)
 var bassChangeRate = 0.01;     // Decide how fast the bass knob should turn left on the current deck
 							// while transitioning.  Sounds cleaner than 2 tracks playing bass beats
@@ -83,9 +98,23 @@ var bassChangeRate = 0.01;     // Decide how fast the bass knob should turn left
                                     // 0.0 Does not turn left at all (i.e. both tracks full bass levels during transition)
                                     // 1.0: Turns to the far left instantly
                                     // Unit: Float; Range: 0.0 to 1.0; Default: 0.01
-var debug = false;
+var bassBoost = false;		// If true, analyses the incoming track and increases the bass level only
+							// if peak VU meter on the incoming track <= 0.75
+var maxBassBoost = 2.5;		// Max EQ ("L" knob) setting if bassBoost enabled (and track has low enough peak VU)
+							// This is just a safety limit to ensure it doesn't crank "L" to the max leading to clipping/distortion
 
-// Working globals
+// User settings end here.  Venture below at your peril :)
+
+// Developer help
+var debug = false;			// Set to true to see console output (Developer Tools -> Log from menu or ~/.mixxx/mixxx.log)
+/*
+	Start mixxx with:
+	mixxx --developer
+	in order to view the Options -> Developer Tools to view any script errors / log (or tail -f ~/.mixxx/mixxx.log)
+	Developer mode is NOT require for normal use (just debugging!)
+*/
+
+// Working globals - don't change/edit these
 var crossFaderConnection, channel1TrackLoaded, channel2TrackLoaded
 var fadingActive = false;
 var remainingIterations = 0, recheckBeat = 0;
@@ -94,6 +123,8 @@ var currDeck, nextDeck, currChannel, nextChannel, ndRateRange, cdRateRange, fade
 var ndRateDelta, ndNewRate, cdRateDelta, cdNewRate, cdBeatDistance, ndBeatDistance, phaseGap, currSkips;
 var cdFileBPM, ndFileBPM, ndTargetRate, ndRateStepSize, cdTargetRate, cdRateStepSize, fadeStart;
 var currChannelEq,checkTrackLoadedTimer, bassZeroed, trackLoaded, cdFilterLow;
+var mainChannel, adjChannel, nextChannelEq, currVuMeter, maxVuMeter, boostCounter, applyBoostId = 0;
+var bassBoostInit, setBassAndMonitor, ndFilterLow, maxBassToSet;
 
 beatItAutoDJ.init = function() {
 	// Initialise the script.  Enable options to help beat matching
@@ -138,6 +169,7 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 		currChannel = "[Channel"+currDeck+"]";
 		currChannelEq = "[EqualizerRack1_[Channel" + currDeck + "]_Effect1]";
 		nextChannel = "[Channel"+nextDeck+"]";
+		nextChannelEq = "[EqualizerRack1_[Channel" + nextDeck + "]_Effect1]";
 
 		// Used to determine the relative rate increase/decrease to apply below (as a percentage away from fade start)
 		fadeStart = value < 0 ? -1.0 : 1.0;
@@ -171,6 +203,10 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 		// We'll then slowly increase/decrease the rate of both decks (toward the target) as the crossfader moves
 		engine.setValue(nextChannel, "rate", ndTargetRate);
 		bassZeroed = false;
+		recheckBeat = 0;
+		bassBoostInit = false;
+		if (applyBoostId !== 0) engine.stopTimer(applyBoostId);
+		applyBoostId = 0;
 	}
 
 	// RATE RAMP UP / DOWN SECTION - BOTH DECKS
@@ -200,42 +236,57 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 	// BEATMATCH CHECK AND ADJUST SECTION
 	// ==================================
 
-	// Only do this every 5 movements of the crossfader (easier on the CPU!)
-	if (recheckBeat > 5) {
-		recheckBeat = 0;
+	// Only do this every 3 movements of the crossfader (easier on the CPU!)
+	if (recheckBeat <= 0) {
+		recheckBeat = 3;
 		// Snap the beat of the incoming track to the current
 
+		// We'll start adjusting the next channel, but after halfway, we'll align the current channel
+		// so we adjust the channel that is lesser in volume (making any glitches less obvious)
+
+		// Check if over halfway
+		if ((fadeStart * value) > 0 ) {
+			// Under half way, alter next deck
+			mainChannel = currChannel;
+			adjChannel = nextChannel;
+		} else {
+			// Over half way, alter current deck
+			mainChannel = nextChannel;
+			adjChannel = currChannel;
+		}
 		// Check the relative beat distance between channels/decks
-		cdBeatDistance = engine.getValue(currChannel, "beat_distance");
-		ndBeatDistance = engine.getValue(nextChannel, "beat_distance");
+		cdBeatDistance = engine.getValue(mainChannel, "beat_distance");
+		ndBeatDistance = engine.getValue(adjChannel, "beat_distance");
 
 		phaseGap = ndBeatDistance - cdBeatDistance;
 
 		// Choose the closest native beat fraction jump based on the gap size
     	// Options include: 0.03125 (1/32 beat), 0.0625 (1/16), 0.125 (1/8), 0.25 (1/4), 0.5 (1/2)
 		// The loop following will fine tune and track beat matching through both channels being rate adjusted to the target track
+		// We adjust the next track as it isn't as audible as the current track, allowing us to get the beats lined
+		// up early on when the current track has most of the volume
 		fOrB = (phaseGap > 0) ? "backward" : "forward";
 
 		phaseGap = Math.abs(phaseGap);
 		switch (true) {
 			case (phaseGap > 0.375):
-        		engine.setValue(nextChannel, "beatjump_0.5_" + fOrB, 1);				
+        		engine.setValue(adjChannel, "beatjump_0.5_" + fOrB, 1);				
 				break;
 			case (phaseGap > 0.1875):
-        		engine.setValue(nextChannel, "beatjump_0.25_" + fOrB, 1);				
+        		engine.setValue(adjChannel, "beatjump_0.25_" + fOrB, 1);				
 				break;
 			case (phaseGap > 0.09375):
-        		engine.setValue(nextChannel, "beatjump_0.125_" + fOrB, 1);				
+        		engine.setValue(adjChannel, "beatjump_0.125_" + fOrB, 1);				
 				break;
-			case (phaseGap > 0.04):
-        		engine.setValue(nextChannel, "beatjump_0.0625_" + fOrB, 1);				
+			case (phaseGap > 0.0468):
+        		engine.setValue(adjChannel, "beatjump_0.0625_" + fOrB, 1);				
 				break;
 			case (phaseGap > 0.01):
-        		engine.setValue(nextChannel, "beatjump_0.03125_" + fOrB, 1);				
+        		engine.setValue(adjChannel, "beatjump_0.03125_" + fOrB, 1);				
 				break;
 		}
 	}
-	recheckBeat ++;
+	recheckBeat --;
 
 	// FADE OUT CURRENT TRACK BASS
 	// ===========================
@@ -246,13 +297,66 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 				engine.setValue(currChannelEq, "parameter1", 0)
 				bassZeroed = true;
 			} else {
-				engine.setValue(currChannelEq, "parameter1", cdFilterLow - bassChangeRate);
+				// If bassBoost is on, the current track may be boosted more, so we'll increase the rolloff rate by
+				// the max boost value
+				engine.setValue(currChannelEq, "parameter1", cdFilterLow - (((cdFilterLow > 1.0) ? 2 : 1) * bassChangeRate));
 			}
 		}
 	}
+
+	// BASS BOOST (IF ENABLED)
+	// =======================
+	// Check if the incoming track has a peak main meter reading < 0.7, if so, "bump" up the bass.
+	// We start this midfade to give the incoming track time to "ramp up" a bit, so we don't overindex the bass
+	if (bassBoost && !bassBoostInit && ((fadeStart * value) < 0)) {
+		beatItAutoDJ.debug("bass boost analysis starting...");
+		bassBoostInit = true;
+		if (applyBoostId !== 0) engine.stopTimer(applyBoostId);
+		boostCounter = 0;
+		maxVuMeter = 0;
+		maxBassToSet = 0;
+		setBassAndMonitor = false;
+		applyBoostId = engine.beginTimer(50, beatItAutoDJ.applyBassBoost);
+	}
+
 	// Check if crossfader has reached the other side. If so, reset fading and bass level for next track change
 	fadingActive = Math.abs(value) == 1 ? false : true;
-	if (!fadingActive && bassChangeRate > 0) engine.setValue(currChannelEq, "parameter1", 1);
+	if (!fadingActive && bassChangeRate > 0) {
+		engine.setValue(currChannelEq, "parameter1", 1);
+	}
+}
+
+beatItAutoDJ.applyBassBoost = function() {
+	boostCounter++;
+
+	// After commencing, check the levels of the channel vu_meter for the incoming track
+	if (boostCounter < 200) {
+		currVuMeter = engine.getValue(nextChannel, "vu_meter");
+		if (currVuMeter > maxVuMeter) maxVuMeter = currVuMeter;
+	} else if (boostCounter < 400) {
+		// After 10 seconds, check the max vu meter. We'll use a proportional ramp up as long as the peak
+		// VU isn't already 0.75, otherwise it's deemed the track has enough bass, so leaves the default 1.0 setting
+		// on the "L" EQ control
+		// We'll allow up to 10 seconds to effect the ramp up
+		if (!setBassAndMonitor) {
+			beatItAutoDJ.debug("maxVuMeter after 5 seconds: " + maxVuMeter);
+			setBassAndMonitor = true;
+			if (maxVuMeter <= 0.8) {
+//				maxBassToSet = ((0.75 - maxVuMeter) / 0.20) * maxBassBoost;
+				maxBassToSet = ((0.80 - maxVuMeter) / 0.20) * maxBassBoost;
+				if (maxBassToSet > maxBassBoost) maxBassToSet = maxBassBoost;
+				beatItAutoDJ.debug("maxBassToSet: " + maxBassToSet);
+			}
+		}
+		ndFilterLow = engine.getValue(nextChannelEq, "parameter1");
+		if (maxBassToSet > ndFilterLow  && (boostCounter % 2 === 0)) {
+			engine.setValue(nextChannelEq, "parameter1", ndFilterLow + bassChangeRate);
+		}
+	} else {
+		if (applyBoostId !== 0) engine.stopTimer(applyBoostId);
+		beatItAutoDJ.debug("bass boost ended");
+		applyBoostId = 0;
+	}
 }
 
 beatItAutoDJ.getPlayingChannel = function() {
