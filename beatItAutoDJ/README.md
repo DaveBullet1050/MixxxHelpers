@@ -6,11 +6,11 @@ will slide down the tempo of the next track to meet the current.  Instead, I wan
 its original tempo.  
 
 How it works:
-1. When AutoDJ is enabled and AutoDJ loads the next (incoming) track
-2. When AutoDJ starts the crossfade
-3. Sets the incoming track to the same tempo as the outgoing track
-4. As the crossfade moves, beat matches both tracks, tuning throughout the fade and increases (or decreases) tempo of the outgoing track to match
-   the original speed of the incoming track  
+1. Enable AutoDJ and it will start to play
+2. When AutoDJ starts the crossfade to the next song
+3. The script starts by setting the incoming track to the same tempo as the outgoing track
+4. As the crossfade moves, increases (or decreases) both deck rates (speed/tempo) to slowly move to the target rate of the incoming track
+5. Whilst the tempo is moving, also maintains beat matches across both tracks, tuning throughout the fade by slightly bumping initially the incoming track, then outgoing track to align beats
 
 ## Recommended AutoDJ / mixxx settings
 Setup Mixxx as follows (tested on v.2.5.6):
