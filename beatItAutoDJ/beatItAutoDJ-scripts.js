@@ -5,16 +5,20 @@ function beatItAutoDJ() {}
 /*
 	beatItAutoDJ
 	License: GPLv2 or GPLv3, at your discretion and risk
-	 Author: Dave Bullet, 2026-06-30
+	 Author: Dave Bullet, 2026-07-08
 	    	Credit to: Sophia Herzog, 2016-2017, Stephen Larroque, 2021 (original script and lowbass transition option)
 	 Change history:
 	 	v0.1 - 2026-06-30 - Initial version
 		v0.2 - 2026-07-02 - Added bpm tolerance to skip tracks not in bpmTolerance range (with a max number of skips)
 							so it doesn't loop forever
 		v0.3 - 2026-07-03 - Resync beats on first crossfade movement (rather than wait) and resyncs every 3 cycles (smoother)
-						  - Beat syncing switches to from incoming to outgoing channel, so any mistakes aren't as audible as it is fading out
+						  - Beat syncing switches from incoming to outgoing channel, so any changes aren't as audible as it is fading out
 						  - Tweaked beatsync bands to be exactly in the middle
 						  - Added bass boost (disabled by default) to help bass "weak" tracks as was common in the 70s and 80s
+		v0.4 - 2026-07-08 - Added beatMatch flag to allow user to turn on / off beatmatching during crossfade
+						  - Lengthened time for bass boost and reduced max limit to 2.0
+						  - Cut high and mid frequencies to 0.75 (1.0 is default centre/flat) if rolloffMidHigh = true
+						  - improved beatmatch logic to minimise the beat shift in the closest direction
 	 Mixxx version: v.2.5.6
 	 Repo: https://github.com/DaveBullet1050/MixxxHelpers
 
@@ -85,12 +89,13 @@ function beatItAutoDJ() {}
 // ==============
 // You can change these at any time. Saving this file will automatically trigger a reload by Mixxx (i.e 
 // no need to restart Mixxx)
-var bpmTolerance = 0;		// +/- difference in BPM between adjacent tracks.  If the next track is outside this range
+var bpmTolerance = 8;		// +/- difference in BPM between adjacent tracks.  If the next track is outside this range
 							// it is skipped, loading the next track (in the hope it is closer).
-							// A good number is probably 10 - 15
-							// Set this to zero if you don't want a tolerance (i.e. do not skip any tracks, play in order loaded)
+							// A good number is probably 8 - 12
+							// Set this to zero if you don't to skip any tracks (i.e. play in order loaded, regardles of how big a bpm jump there is between)
 var maxBpmToleranceSkips = 5;	// Only if bpmTolerance > 0, how many tracks will be skipped to find a close enough bpm tolerance track, before just
 								// grabbing the next one (a crude way to stop infinite skipping)
+var beatMatch = true;			// If true, will initially beat match then continue to tune during transition. Otherwise no beat matching (just tempo/rate matching)
 var bassChangeRate = 0.01;     // Decide how fast the bass knob should turn left on the current deck
 							// while transitioning.  Sounds cleaner than 2 tracks playing bass beats
 							// even though they are beat matched.  0.01 provides a gradual roll off
@@ -100,8 +105,9 @@ var bassChangeRate = 0.01;     // Decide how fast the bass knob should turn left
                                     // Unit: Float; Range: 0.0 to 1.0; Default: 0.01
 var bassBoost = false;		// If true, analyses the incoming track and increases the bass level only
 							// if peak VU meter on the incoming track <= 0.75
-var maxBassBoost = 2.5;		// Max EQ ("L" knob) setting if bassBoost enabled (and track has low enough peak VU)
+var maxBassBoost = 2.0;		// Max EQ ("L" knob) setting if bassBoost enabled (and track has low enough peak VU)
 							// This is just a safety limit to ensure it doesn't crank "L" to the max leading to clipping/distortion
+var rolloffMidHigh = false;	// Flat mid and high frequencies can be bright / harsh for DJ setups, to take these down slightly if true
 
 // User settings end here.  Venture below at your peril :)
 
@@ -124,7 +130,7 @@ var ndRateDelta, ndNewRate, cdRateDelta, cdNewRate, cdBeatDistance, ndBeatDistan
 var cdFileBPM, ndFileBPM, ndTargetRate, ndRateStepSize, cdTargetRate, cdRateStepSize, fadeStart;
 var currChannelEq,checkTrackLoadedTimer, bassZeroed, trackLoaded, cdFilterLow;
 var mainChannel, adjChannel, nextChannelEq, currVuMeter, maxVuMeter, boostCounter, applyBoostId = 0;
-var bassBoostInit, setBassAndMonitor, ndFilterLow, maxBassToSet;
+var bassBoostInit, setBassAndMonitor, ndFilterLow, maxBassToSet, midHighLevel, firstBpmAdjust;
 
 beatItAutoDJ.init = function() {
 	// Initialise the script.  Enable options to help beat matching
@@ -136,6 +142,13 @@ beatItAutoDJ.init = function() {
 	engine.setValue("[Channel2]", "keylock", 1.0);
 	engine.setValue("[Channel1]", "keylockMode", 0.0);
 	engine.setValue("[Channel2]", "keylockMode", 0.0);
+
+	// Check if mid and high rolloff wanted, and apply:
+	(rolloffMidHigh) ? midHighLevel = 0.75 : midHighLevel = 1.0;
+	engine.setValue("[EqualizerRack1_[Channel1]_Effect1]", "parameter2", midHighLevel);
+	engine.setValue("[EqualizerRack1_[Channel1]_Effect1]", "parameter3", midHighLevel);
+	engine.setValue("[EqualizerRack1_[Channel2]_Effect1]", "parameter2", midHighLevel);
+	engine.setValue("[EqualizerRack1_[Channel2]_Effect1]", "parameter3", midHighLevel);
 
 	// Our script will beat match during the crossfade between decks.  Register the event, that way we do not waste CPU
 	// inbetween and have to check status etc... Mixxx will only call this when the cross fader is actually moved
@@ -207,6 +220,7 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 		bassBoostInit = false;
 		if (applyBoostId !== 0) engine.stopTimer(applyBoostId);
 		applyBoostId = 0;
+		firstBpmAdjust = true;
 	}
 
 	// RATE RAMP UP / DOWN SECTION - BOTH DECKS
@@ -236,8 +250,8 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 	// BEATMATCH CHECK AND ADJUST SECTION
 	// ==================================
 
-	// Only do this every 3 movements of the crossfader (easier on the CPU!)
-	if (recheckBeat <= 0) {
+	// Only do this every 3 movements of the crossfader (easier on the CPU!) and beat matching is enabled
+	if (beatMatch && recheckBeat <= 0) {
 		recheckBeat = 3;
 		// Snap the beat of the incoming track to the current
 
@@ -262,10 +276,26 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 
 		// Choose the closest native beat fraction jump based on the gap size
     	// Options include: 0.03125 (1/32 beat), 0.0625 (1/16), 0.125 (1/8), 0.25 (1/4), 0.5 (1/2)
-		// The loop following will fine tune and track beat matching through both channels being rate adjusted to the target track
-		// We adjust the next track as it isn't as audible as the current track, allowing us to get the beats lined
-		// up early on when the current track has most of the volume
-		fOrB = (phaseGap > 0) ? "backward" : "forward";
+
+		// Sometimes when beats are very close one track the phase reference can be nearly a "whole beat" ahead or behind
+		// so we normalise it to within 1/2 a beat and "flip" the phase adjustment.  This stops large > 0.7 phase adjustments in the wrong direction
+		if (Math.abs(phaseGap) > 0.625) {
+			// Shift the phase closer to zero by 1/2 a beat
+//			beatItAutoDJ.debug("phaseGap raw: " + phaseGap);
+			// If we are closer to the next beat, then reduce the jump by shifting a smaller beat step in the opposite direction
+			if (phaseGap > 0) {
+				fOrB = "forward";
+				phaseGap = phaseGap - 1;
+			} else {
+				fOrB = "backward";
+				phaseGap = 1 + phaseGap;
+			}
+//			beatItAutoDJ.debug("phaseGap adjusted: " + phaseGap);
+		} else {
+			// Otherwise, we are within ~1/2 a beat so just pull the other track back (if advanced) or forward (if behind)
+			fOrB = (phaseGap > 0) ? "backward" : "forward";
+//			beatItAutoDJ.debug("phaseGap close: " + phaseGap);
+		} 
 
 		phaseGap = Math.abs(phaseGap);
 		switch (true) {
@@ -281,10 +311,11 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 			case (phaseGap > 0.0468):
         		engine.setValue(adjChannel, "beatjump_0.0625_" + fOrB, 1);				
 				break;
-			case (phaseGap > 0.01):
+			case (phaseGap >= 0.01):
         		engine.setValue(adjChannel, "beatjump_0.03125_" + fOrB, 1);				
 				break;
 		}
+		firstBpmAdjust = false;
 	}
 	recheckBeat --;
 
