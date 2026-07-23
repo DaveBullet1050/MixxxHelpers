@@ -4,12 +4,15 @@ This MIDI controller script overcomes some issues I was struggling with, with th
 
 By default AutoDJ has a master deck and when sync is enabled, will slide down the tempo of the next track to meet the current.  Instead, I wanted the behaviour where all tracks play at their native rate, but "rate match" when the crossfade starts, and keep track along with beatmatching, so that you get a smooth transition and the next track plays at its original tempo, keeping both songs in beat sync during the fade.  
 
+The script optionally also supports syncing lights via sending a MIDI "beat note".  Whilst Mixxx ships with a "MIDI for Light" script to do the same, I found it failed at higher BPM and wasn't tuneable for any system latencies (especially if you run your fixtures on another device).
+
 ## How it works
 1. Enable AutoDJ and it will start to play
 2. When AutoDJ starts the crossfade to the next song
 3. The script starts by setting the incoming track to the same tempo as the outgoing track
 4. As the crossfade moves, increases (or decreases) both deck rates (speed/tempo) to slowly move to the target rate of the incoming track
 5. Whilst the tempo is moving, also maintains beat matches across both tracks, tuning throughout the fade by slightly bumping initially the incoming track, then outgoing track to align beats
+6. Optionally - the script will send a "beat" note on for the song playing on the current deck (prioritising decks during crossfade), so you get a smooth transition for your lighting as well
 
 ## Recommended AutoDJ / mixxx settings
 Setup Mixxx as follows (tested on v.2.5.6):
