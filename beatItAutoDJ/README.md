@@ -27,7 +27,7 @@ Setup Mixxx as follows (tested on v.2.5.6):
 ## Installation
 Mixxx uses MIDI controllers to "plug in" and either operate Mixxx functions or augment them with processing.  The script here is run under a "virtual" MIDI device/controller.  The following steps describe how to setup the controller, install the script (.js and .xml) then select the controller so it is activated.  
 
-First, copy the .js and adjacent *.xml from this repo into your user's configuration directory (On Linux, under /home/<user>, eg: ~/.mixxx/controllers).  
+First, copy the .js and adjacent *.xml from this repo into your user's configuration directory (On Linux, under /home/your_user, eg: home/your_user/.mixxx/controllers).  
 
 There are 2 ways to setup the script, depending on whether you want just beat matching or beat matching + lighting control (via sending a MIDI signal to software controlling lighting fixtures).  Choose one of the following (the first is the easiest).
 
