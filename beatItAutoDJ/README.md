@@ -85,7 +85,7 @@ Open the .js file and you can edit the following (look under the //User Variable
 ### Lighting fixture synchronisation
 | Parameter | Default value | Description |
 | :---: | :---: | --- |
-| bpmLeadTime | 0 | Time (in milliseconds) to send a MIDI beat signal (e.g. to lighting software) "ahead" of the beat. If = 0 - no signal is sent.  If > 0, send a beat signal over the MIDI channel with no latency. If > 5, lead the beat signal by the number of miliseconds.  This allows for any latency due to slow computer or off board  lighting system with latent connection |
+| bpmLeadTime | 0 | Time (in microseconds) to send a MIDI beat signal (e.g. to lighting software) "ahead" of the beat. If = 0 - no signal is sent.  If > 0, send a beat signal over the MIDI channel with no latency. If > 5, lead the beat signal by the number of miliseconds.  This allows for any latency due to slow computer or off board  lighting system with latent connection |
 | midiChannel | 1 | MIDI channel to send beat information over (only used if bpmLeadTime > 0) |
 
 ## Other tips
