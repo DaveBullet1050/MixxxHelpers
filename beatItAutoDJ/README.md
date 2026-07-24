@@ -63,9 +63,7 @@ Select beatItAutoDJ and click "Enabled"
 4. Start/Enable AutoDJ.  When tracks transition they should auto align and maintain a beat match.  You can click the "Trigger transition to next track" button (right next to the on/off AutoDJ buton) to force transition to the next track  
 
 ## User editable parameters
-You can either change these via the Options -> Preferences -> Controllers page (selecting the controller you configured above), or hand editing the values in the .js file.  
-
-Open the .js file and you can edit the following (look under the //User Variables heading):
+Change these via the Options -> Preferences -> Controllers page (selecting the controller you configured above):
 
 ### Beat and track matching specific parameters
 | Parameter | Default value | Description |
