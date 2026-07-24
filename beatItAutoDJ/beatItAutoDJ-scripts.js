@@ -63,7 +63,7 @@ var midiChannel = 1;
 // User settings end here.  Venture below at your peril :)
 
 // Developer help
-var debug = true;			// Set to true to see console output (Developer Tools -> Log from menu or ~/.mixxx/mixxx.log)
+var debug = false;			// Set to true to see console output (Developer Tools -> Log from menu or ~/.mixxx/mixxx.log)
 /*
 	Start mixxx with:
 	mixxx --developer
@@ -81,7 +81,7 @@ var ndRateDelta, ndNewRate, cdRateDelta, cdNewRate, cdBeatDistance, ndBeatDistan
 var cdFileBPM, ndFileBPM, ndTargetRate, ndRateStepSize, cdTargetRate, cdRateStepSize, fadeStart;
 var currChannelEq,checkTrackLoadedTimer, bassZeroed, trackLoaded, cdFilterLow;
 var mainChannel, adjChannel, nextChannelEq, currVuMeter, maxVuMeter, boostCounter, applyBoostId = 0;
-var bassBoostInit, setBassAndMonitor, ndFilterLow, maxBassToSet, midHighLevel, firstBpmAdjust;
+var bassBoostInit, setBassAndMonitor, ndFilterLow, maxBassToSet, firstBpmAdjust;
 var beatProcessed, prevBeatDistance = 0;
 var channel1BeatDistance, channel2BeatDistance, beatSlope, beatIntercept;
 
@@ -157,7 +157,6 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 		// to offset this by the rate range being set on the deck (via Options -> Decks -> Slider range) to find
 		// the correct relative rate value to the degree of slider movement.  90% in the Mixxx options allows the greatest BPM difference between tracks
 		ndRateRange = engine.getValue(nextChannel, "rateRange");
-//		beatItAutoDJ.debug("ndRateRange: " + ndRateRange);
 		ndTargetRate = -1 * ((cdFileBPM - ndFileBPM) / ndFileBPM / ndRateRange);
 
 		// Keep within the bounds of the control
@@ -166,7 +165,6 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 		beatItAutoDJ.debug("ndTargetRate: " + ndTargetRate);
 
 		cdRateRange = engine.getValue(currChannel, "rateRange");
-//		beatItAutoDJ.debug("cdRateRange: " + cdRateRange);
 		cdTargetRate = -1 * ((ndFileBPM - cdFileBPM) / cdFileBPM / cdRateRange);
 		if (cdTargetRate > 1.0) cdTargetRate = 1.0;
 		if (cdTargetRate < -1.0) cdTargetRate = -1.0;
