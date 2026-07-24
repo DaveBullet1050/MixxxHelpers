@@ -3,10 +3,124 @@
     <info>
         <name>beatItAutoDJ</name>
         <author>Dave Bullet</author>
-        <description>Rate and beat matching for smoother transitions in AutoDJ in Mixxx.  Tested on Mixxx v2.5.6</description>
+        <description>Rate and beat matching for smoother transitions in AutoDJ in Mixxx.  Also supports a more reliable MIDI beat note for lighting software.  Tested on Mixxx v2.5.6</description>
         <wiki>https://mixxx.discourse.group/t/auto-dj-extension-for-beatmatching-and-harmonic-mixing/15962</wiki>
         <forums>https://mixxx.discourse.group/t/auto-dj-extension-for-beatmatching-and-harmonic-mixing/15962</forums>
     </info>
+    <settings>
+        <group label="Beat and track matching">
+            <row orientation="vertical">
+                <option
+                    variable="beatMatch"
+                    type="boolean"
+                    default="true"
+                    label="Enable beat matching during crossfade">
+                    <description>
+                        If true, adjusts the beat to synchronise along with rate matching from current to next track. If you just want rate (tempo) matching and without beat alignment, set this to false
+                    </description>
+                </option>
+                <option
+                    variable="bpmTolerance"
+                    type="integer"
+                    min="0"
+                    default="0"
+                    label="Range of BPM variation tolerated between tracks">
+                    <description>
+                       If &gt; 0, this defines the +/- difference allowed in BPM between adjacent tracks. i.e. if the current track is 127 BPM and next track to play is 137 BPM a bpmTolerance of 10 would match these. The purpose is to not select tracks with too big a bpm difference. Although this poses no problem for the script, the speed change may sound funny to listeners. If set to zero, no BPM comparison is performed (ie. every track is played in order)
+                    </description>
+                </option>
+                <option
+                    variable="maxBpmToleranceSkips"
+                    type="integer"
+                    min="0"
+                    default="5"
+                    label="Maximum number of tracks to skip">
+                    <description>
+                       Only applies if bpmTolerance &gt; 0. This is the maximum number of consecutive tracks that will be skipped outside the bpmTolerance, before aborting and selecting whatever track is next. This stops infinite loop issues
+                    </description>
+                </option>
+            </row>
+        </group>
+        <group label="Frequency response customisation">
+            <row orientation="vertical">
+                <option
+                    variable="bassChangeRate"
+                    type="real"
+                    precision="2"
+                    min="0.0"
+                    max="1.0"
+                    step="0.01"
+                    default="0.01"
+                    label="How quickly to fade outgoing track bass during crossfade">
+                    <description>
+                        If = 0, no bass rolloff is performed.  If &gt; 0 = the rate at which the curent track's bass frequencies will be rolled off in the crossfade, allowing the incoming track's bass to dominate.  Having only one track play bass sounds nicer. 0.01 provides a gradual roll off for a 15 second crossfade / transition.  A max value of 1.0 instantly snaps the bass off at the start of crossfade
+                    </description>
+                </option>
+                <option
+                    variable="bassBoost"
+                    type="boolean"
+                    default="false"
+                    label="Ramp up bass on weak bass tracks">
+                    <description>
+                        If true, the script analyses the incoming track to see if it has sufficient headroom to increase just the bass. Think of it as "bass normalisation" across tracks. Some tracks - especially 60s/70s did not mix with an emphasis on bass. This setting will ramp up the bass gradually to a safe (non-clipping) level after the crossfade, after looking at peak VU (boost only applied if peak vu &lt;= 0.8). If false, bass is untouched
+                    </description>
+                </option>
+                <option
+                    variable="maxBassBoost"
+                    type="real"
+                    precision="2"
+                    min="0.0"
+                    max="3.0"
+                    step="0.05"
+                    default="2.0"
+                    label="Safety maximum to ramp up bass (if enabled)">
+                    <description>
+                        Only applies if bassBoost = true. This is the maximum the "L" knob will be turned if a track has headroom for increasing bass. This value is a safety to ensure it doesn't get turned too high. If too much bass is being applied (and you still want some bass boost), reduce this to 1.5 or so
+                    </description>
+                </option>
+                <option
+                    variable="midHighLevel"
+                    type="real"
+                    precision="2"
+                    min="0.0"
+                    max="2.0"
+                    step="0.05"
+                    default="1.0"
+                    label="Mid and high frequency playback level">
+                    <description>
+                        1.0 = flat. Adjust this if you want to boost (or reduce) the mid and high frequencies. 0.75 is a good value to try if you find your setup harsh/bright
+                    </description>
+                </option>
+            </row>
+        </group>
+        <group label="Lighting fixture synchronisation">
+            <row orientation="vertical">
+                <option
+                    variable="bpmLeadTime"
+                    type="integer"
+                    min="0"
+                    max="500"
+                    step="5"
+                    default="0"
+                    label="Maximum lead time for sending beat over MIDI channel">
+                    <description>
+                       Time (in microseconds) to send a MIDI beat signal (e.g. to lighting software) "ahead" of the beat. If = 0 - no signal is sent. If &gt; 0, send a beat signal over the MIDI channel with no latency. If &gt; 5, lead the beat signal by the number of microseconds. This allows for any latency due to slow computer or off board lighting system with latent connection
+                    </description>
+                </option>
+                <option
+                    variable="midiChannel"
+                    type="integer"
+                    min="1"
+                    max="16"
+                    default="1"
+                    label="MIDI channel to send beat over">
+                    <description>
+                       MIDI channel to send beat information over (only used if bpmLeadTime 0)
+                    </description>
+                </option>
+            </row>
+        </group>
+    </settings>
     <controller id="beatItAutoDJ">
             <scriptfiles>
                 <file filename="beatItAutoDJ-scripts.js" functionprefix="beatItAutoDJ"/>

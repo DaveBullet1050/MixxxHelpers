@@ -19,105 +19,56 @@ function beatItAutoDJ() {}
 						  - Lengthened time for bass boost and reduced max limit to 2.0
 						  - Cut high and mid frequencies to 0.75 (1.0 is default centre/flat) if rolloffMidHigh = true
 						  - improved beatmatch logic to minimise the beat shift in the closest direction
-	 Mixxx version: v.2.5.6
-	 Repo: https://github.com/DaveBullet1050/MixxxHelpers
+		v0.5 - 2026-07-24 - Added ability to enable sending the beat over the active Midi Through channel with a configurable lead time
+							to allow for platform specific latencies.
+						  - Added all user configuration options to the XML to enable setting via Mixxx UI
+
+	 Tested with Mixxx version: v.2.5.6
 
 	Overview:
 	---------
-	Assumes 2 decks with AutoDJ enabled and all tracks have been analysed to get their individual BPM.
-	The script only operates during a crossfade between 2 tracks, so isn't polling constantly wasting CPU.
-	
-	When AutoDJ loads the next track and starts to crossfade, the script immediately sets the incoming track (next deck) to the current deck's rate/speed.
-	So they both play at the same rate. The script then slowly increases (or decreases) the tempo of both tracks to reach the target speed of the next deck's track.
-	The script maintains pitch during rate changes and checks for beat alignment, adjusting beat as necessary.
+	Please see README at
 
-	This script does contain user changeable behaviour.  Change variable values under the section:
-	// User Variables
-	below
-
-	Changes to this script are dynamic in Mixxx.  Save and Mixxx instantly reloads.
-	
-	Recommended AutoDJ / mixxx settings:
-	------------------------------------
-	Duration of transition: 15 seconds.  Anything will work, but this seems reasonable.
-
-	Options -> Decks ->
-		Slider range: 90%.  This allows the most variation between BPM of tracks
-		Reset on track load: Key/Pitch (checked)
-		Reset on track load: Speed/Tempo (checked)
-		Sync mode: Use steady tempo
-
-	If you are playing Mixxx over VNC/Remote desktop and encounter CPU peaks/audio stutters, increase:
-	Options -> Sound hardware -> Audio buffer: 92.9msec
-	(Note: the above is not due to this script, but just general latency/load)
-
-	This script assumes every track has BPM metadata.  To do this, 
-	Make sure you analyse every track in your AutoDJ playlist (or your full your library.
-	You can do this by selecting all tracks (in AutoDJ list or full library) without a BPM value and 
-	right click -> Analyse -> Analyse)
-
-	System setup (Linux users):
-	------------------------
-	1. Ensure you have a virtual midi controller loaded.  This requires a kernel module load.  Create a file:
-	/etc/modules-load.d/snd_virmidi.conf
-
-	containing:
-	snd_virmidi
-
-	2. Create a file:
-	/etc/modprobe.d/snd-virmidi.conf 
-
-	containing:
-	options snd-virmidi enable=1 midi_devs=1
-
-	(the above creates just 1 midi virtual controller)
-	... and reboot your machine (or run "modprobe snd_virmidi" if you want to load immediately with 4 midi controllers)
-
-	3. Copy this script (and adjacent) *.xml into your user's configuration directory, usually under /home/<user>, eg: ~/.mixxx/controllers
-
-	4. (Re)start Mixxx.  Go into: Options -> Controllers.  You should see a "VirMIDI 1-0" controller.
-	In the "Load Mapping" you should see "beatItAutoDJ" in the list (if you copied the .js and .xml files correctly above).
-	Select beatItAutoDJ and click "Enabled"
-
-	Activating:
-	-----------
-	5. Start/Enable AutoDJ.  When tracks transition they should auto align and maintain a beat match.  You can click the "Trigger transition to next track"
-	button (right next to the on/off AutoDJ buton) to force transition to the next track
+	Repo: https://github.com/DaveBullet1050/MixxxHelpers/blob/main/beatItAutoDJ/README.md
 */
 
 // User Variables
 // ==============
-// You can change these at any time. Saving this file will automatically trigger a reload by Mixxx (i.e 
-// no need to restart Mixxx)
-var bpmTolerance = 8;		// +/- difference in BPM between adjacent tracks.  If the next track is outside this range
-							// it is skipped, loading the next track (in the hope it is closer).
-							// A good number is probably 8 - 12
-							// Set this to zero if you don't to skip any tracks (i.e. play in order loaded, regardles of how big a bpm jump there is between)
-var maxBpmToleranceSkips = 5;	// Only if bpmTolerance > 0, how many tracks will be skipped to find a close enough bpm tolerance track, before just
-								// grabbing the next one (a crude way to stop infinite skipping)
-var beatMatch = true;			// If true, will initially beat match then continue to tune during transition. Otherwise no beat matching (just tempo/rate matching)
-var bassChangeRate = 0.01;     // Decide how fast the bass knob should turn left on the current deck
-							// while transitioning.  Sounds cleaner than 2 tracks playing bass beats
-							// even though they are beat matched.  0.01 provides a gradual roll off
-							// for a 15 second crossfade / transition
-                                    // 0.0 Does not turn left at all (i.e. both tracks full bass levels during transition)
-                                    // 1.0: Turns to the far left instantly
-                                    // Unit: Float; Range: 0.0 to 1.0; Default: 0.01
-var bassBoost = false;		// If true, analyses the incoming track and increases the bass level only
-							// if peak VU meter on the incoming track <= 0.75
-var maxBassBoost = 2.0;		// Max EQ ("L" knob) setting if bassBoost enabled (and track has low enough peak VU)
-							// This is just a safety limit to ensure it doesn't crank "L" to the max leading to clipping/distortion
-var rolloffMidHigh = false;	// Flat mid and high frequencies can be bright / harsh for DJ setups, to take these down slightly if true
+// You can change these at any time (via the Mixxx UI). Changes via the ui are stored in your ~/.mixxx/mixxx.cfg.
+// Read the Github README (link above) for an explanation of each, or hover over the setting in the preferences dialogue for an explanation.
+
+var beatMatch = engine.getSetting("beatMatch");
+var bpmTolerance = engine.getSetting("bpmTolerance");
+var maxBpmToleranceSkips = engine.getSetting("maxBpmToleranceSkips");
+var bassChangeRate = engine.getSetting("bassChangeRate");
+var bassBoost = engine.getSetting("bassBoost");
+var maxBassBoost = engine.getSetting("maxBassBoost");
+var midHighLevel = engine.getSetting("midHighLevel");
+var bpmLeadTime = engine.getSetting("bpmLeadTime");
+var midiChannel = engine.getSetting("midiChannel");
+
+/*
+Default settings when previously script (rather than XML/UI) driven:
+var bpmTolerance = true;		
+var bpmTolerance = 0;		
+var maxBpmToleranceSkips = 5;
+var bassChangeRate = 0.01;
+var bassBoost = false;
+var maxBassBoost = 2.0;
+var midHighLevel = 1.0;
+var bpmLeadTime = 100;
+var midiChannel = 1;
+*/
 
 // User settings end here.  Venture below at your peril :)
 
 // Developer help
-var debug = false;			// Set to true to see console output (Developer Tools -> Log from menu or ~/.mixxx/mixxx.log)
+var debug = true;			// Set to true to see console output (Developer Tools -> Log from menu or ~/.mixxx/mixxx.log)
 /*
 	Start mixxx with:
 	mixxx --developer
 	in order to view the Options -> Developer Tools to view any script errors / log (or tail -f ~/.mixxx/mixxx.log)
-	Developer mode is NOT require for normal use (just debugging!)
+	Developer mode is ONLY required if you are using setting bpmLeadTime > 0 to enable lighting software integration (to send MIDI events)
 */
 
 // Working globals - don't change/edit these
@@ -131,6 +82,8 @@ var cdFileBPM, ndFileBPM, ndTargetRate, ndRateStepSize, cdTargetRate, cdRateStep
 var currChannelEq,checkTrackLoadedTimer, bassZeroed, trackLoaded, cdFilterLow;
 var mainChannel, adjChannel, nextChannelEq, currVuMeter, maxVuMeter, boostCounter, applyBoostId = 0;
 var bassBoostInit, setBassAndMonitor, ndFilterLow, maxBassToSet, midHighLevel, firstBpmAdjust;
+var beatProcessed, prevBeatDistance = 0;
+var channel1BeatDistance, channel2BeatDistance, beatSlope, beatIntercept;
 
 beatItAutoDJ.init = function() {
 	// Initialise the script.  Enable options to help beat matching
@@ -143,8 +96,7 @@ beatItAutoDJ.init = function() {
 	engine.setValue("[Channel1]", "keylockMode", 0.0);
 	engine.setValue("[Channel2]", "keylockMode", 0.0);
 
-	// Check if mid and high rolloff wanted, and apply:
-	(rolloffMidHigh) ? midHighLevel = 0.75 : midHighLevel = 1.0;
+	// Set mid / high rolloff
 	engine.setValue("[EqualizerRack1_[Channel1]_Effect1]", "parameter2", midHighLevel);
 	engine.setValue("[EqualizerRack1_[Channel1]_Effect1]", "parameter3", midHighLevel);
 	engine.setValue("[EqualizerRack1_[Channel2]_Effect1]", "parameter2", midHighLevel);
@@ -158,20 +110,28 @@ beatItAutoDJ.init = function() {
 	// that AutoDJ will interfere with (We want total control!)
     channel1TrackLoaded = engine.makeConnection("[Channel1]", "track_loaded", beatItAutoDJ.onTrackLoaded);
     channel2TrackLoaded = engine.makeConnection("[Channel2]", "track_loaded", beatItAutoDJ.onTrackLoaded);
+
+	if (bpmLeadTime > 0) {
+    	channel1BeatDistance = engine.makeConnection("[Channel1]", "beat_distance", beatItAutoDJ.onBeatDistance);
+    	channel2BeatDistance = engine.makeConnection("[Channel2]", "beat_distance", beatItAutoDJ.onBeatDistance);
+	}
 };
 
 beatItAutoDJ.shutdown = function() { // Called by Mixxx - cleanup engine connections gracefully
+	beatItAutoDJ.debug("shutdown");
 	crossFaderConnection.disconnect();
 	channel1TrackLoaded.disconnect();
 	channel2TrackLoaded.disconnect();
+
+	if (channel1BeatDistance) channel1BeatDistance.disconnect();
+	if (channel2BeatDistance) channel2BeatDistance.disconnect();
 };
 
 beatItAutoDJ.debug = function(message) {
-	if (debug) console.debug(message);
+	if (debug) console.debug("beatItAutoDJ:: " + message);
 }
 
 beatItAutoDJ.onCrossFade = function(value, group, key) {
-//	beatItAutoDJ.debug("crossfade: " + value);
 	if (!fadingActive) {
 		// First time at start of the crossfade.
 		// Determine the current deck being faded from.  <0 is the left deck, >= 0 is the right
@@ -237,7 +197,6 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 	// Whether the target rate is negative (faster) or positive (slower), subtracting a delta will head to zero
 	ndNewRate = ndTargetRate - ndRateDelta;
 	engine.setValue(nextChannel, "rate", ndNewRate);
-//	beatItAutoDJ.debug("ndNewRate: " + ndNewRate);
 
 	// Repeat for current deck, we'll slide this along with the next deck so they match tempo/rate
 	// For the current deck, we start at a zero rate, and head (up or down) to match the next deck
@@ -245,7 +204,6 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 	// Whether the rate is negative (go faster) or positive (slow down), adding the delta will head to target rate
 	cdNewRate = 0 + cdRateDelta;	
 	engine.setValue(currChannel, "rate", cdNewRate);
-//	beatItAutoDJ.debug("cdNewRate: " + cdNewRate);
 
 	// BEATMATCH CHECK AND ADJUST SECTION
 	// ==================================
@@ -279,7 +237,7 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 
 		// Sometimes when beats are very close one track the phase reference can be nearly a "whole beat" ahead or behind
 		// so we normalise it to within 1/2 a beat and "flip" the phase adjustment.  This stops large > 0.7 phase adjustments in the wrong direction
-		if (Math.abs(phaseGap) > 0.625) {
+		if (Math.abs(phaseGap) > 0.5) {
 			// Shift the phase closer to zero by 1/2 a beat
 //			beatItAutoDJ.debug("phaseGap raw: " + phaseGap);
 			// If we are closer to the next beat, then reduce the jump by shifting a smaller beat step in the opposite direction
@@ -366,7 +324,7 @@ beatItAutoDJ.applyBassBoost = function() {
 		if (currVuMeter > maxVuMeter) maxVuMeter = currVuMeter;
 	} else if (boostCounter < 400) {
 		// After 10 seconds, check the max vu meter. We'll use a proportional ramp up as long as the peak
-		// VU isn't already 0.75, otherwise it's deemed the track has enough bass, so leaves the default 1.0 setting
+		// VU isn't already 0.8, otherwise it's deemed the track has enough bass, so leaves the default 1.0 setting
 		// on the "L" EQ control
 		// We'll allow up to 10 seconds to effect the ramp up
 		if (!setBassAndMonitor) {
@@ -374,7 +332,7 @@ beatItAutoDJ.applyBassBoost = function() {
 			setBassAndMonitor = true;
 			if (maxVuMeter <= 0.8) {
 //				maxBassToSet = ((0.75 - maxVuMeter) / 0.20) * maxBassBoost;
-				maxBassToSet = ((0.80 - maxVuMeter) / 0.20) * maxBassBoost;
+				maxBassToSet = ((0.8 - maxVuMeter) / 0.20) * maxBassBoost;
 				if (maxBassToSet > maxBassBoost) maxBassToSet = maxBassBoost;
 				beatItAutoDJ.debug("maxBassToSet: " + maxBassToSet);
 			}
@@ -422,7 +380,7 @@ beatItAutoDJ.checkBpmAndSkip = function(playingChannel, waitingChannel, checkCou
         return;
     }
 
-    // See if the new track is within bpmToleranec
+    // See if the new track is within bpmTolerance
     var bpmDiff = Math.abs(currentBpm - upcomingBpm);
     if (bpmDiff <= bpmTolerance) {
         beatItAutoDJ.debug("Match found! Loaded " + upcomingBpm + " BPM against " + currentBpm + " BPM.");
@@ -468,4 +426,63 @@ beatItAutoDJ.onTrackLoaded = function(value, group, key) {
 
 	isEvaluating = true;
 	beatItAutoDJ.checkBpmAndSkip(nextChannel, currChannel, 0);
+}
+
+beatItAutoDJ.onBeatDistance = function (value, group, control) {
+	/*
+		I found the Midi for light would skip beats when relying on beat_active
+		signals for fast (> 150bpm) tracks.  This algorithm instead looks at beat distance and schedules the beat signal to
+		be sent with an (optional) configured amount of lead time (which can be none for immediate play).  This allows for setups where the lighting software
+		may be running over a network or similar with unavoidable delay, hence a lead time allow the beat to send ahead of the audio
+		reaching the beat, thus achieving "sync".  A bpmLeadTime setting < 5 is "run immediately without lead time" when the beat arrives
+		
+		The timing of this event is pretty much random, ~every 20msec
+		So... when we are over halfway (0.5) to the beat (1.0), we'll sleep for the bpmLeadTime configured, 
+		fire the beat, sleep for a rest interval then turn it off
+	*/
+	// Use the primary channel set in the crossfade (if set) so we don't observe both channels triggering a beat during any crossfade
+	if (mainChannel && (mainChannel !== group)) return;
+
+	// We abort if either we've already processed the current beat OR we haven't yet reached the halfway mark to schedule the next beat
+	if (beatProcessed || (value < 0.4)) {
+		if (value < prevBeatDistance) beatProcessed = false;
+		return;
+	}
+
+	// Current beat not handled yet and we're over half beat_distance, we need to schedule the beat
+	// This ensures we don't keep flashing, and wait until the beat next loops around (back to >= 0.0) for the next beat
+	beatProcessed = true;
+
+	// This is so we can track when we loop around and reset for the next beat
+	prevBeatDistance = value;
+
+	// Calculate lead time requested
+	var currBPM = engine.getValue(group, "bpm");
+	var msecsPerBeat = (60 / currBPM * 1000);
+	var msecsToNextBeat = msecsPerBeat * (1.0 - value);
+	var sleepToBeat = msecsToNextBeat - bpmLeadTime;
+	beatItAutoDJ.debug("beat_distance :" + value + " bpm: " + currBPM + " bpmLeadTime: " + bpmLeadTime + " msecsPerBeat: " +
+					msecsPerBeat + " msecsToNextBeat: " + msecsToNextBeat + " sleepToBeat: " + sleepToBeat);
+
+	// If the lead time is minimal, play immediately, otherwise sleep!  Either way, we'll send a beat signal, more or less at beat_distance = 1.0
+	if (sleepToBeat < 5) {
+		midi.sendShortMsg(0x8F + midiChannel, 0x32, 0x64); // note D (50) on with value 64
+
+		engine.beginTimer(((-2 * currBPM) + 400), function() {
+			midi.sendShortMsg(0x8F + midiChannel, 0x32, 0x0); // note D (50) on with value 0
+			midi.sendShortMsg(0x7F + midiChannel, 0x32, 0x0); // note D (59) off with value 0
+		}, true);
+	} else {
+		engine.beginTimer(sleepToBeat, function() {
+
+			midi.sendShortMsg(0x8F + midiChannel, 0x32, 0x64); // note D (50) on with value 64
+
+			// This turns off the note (thus stops the beat signal).  The calculation makes the duration relative to the songs BPM.
+			// Fast songs will have a shorter wait period, slower songs will be longer.  The goal is roughly half time on / off per beat
+			engine.beginTimer(((-2 * currBPM) + 400), function() {
+				midi.sendShortMsg(0x8F + midiChannel, 0x32, 0x0); // note D (50) on with value 0
+				midi.sendShortMsg(0x7F + midiChannel, 0x32, 0x0); // note D (59) off with value 0
+			}, true);  // One shot timer
+		}, true); // One shot timer
+	}
 }
