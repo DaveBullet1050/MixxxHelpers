@@ -1,4 +1,4 @@
-# beatiItAutoDJ
+# beatItAutoDJ
 
 This MIDI controller script overcomes some issues I was struggling with, with the built in AutoDJ and also MIDI for Lights for beat syncing lighting fixtures.  
 
