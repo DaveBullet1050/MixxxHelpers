@@ -2,17 +2,30 @@
 
 This MIDI controller script overcomes some issues I was struggling with, with the built in AutoDJ and also MIDI for Lights for beat syncing lighting fixtures.  
 
-By default AutoDJ has a master deck and when sync is enabled, will slide down the tempo of the next track to meet the current.  Instead, I wanted the behaviour where all tracks play at their native rate, but "rate match" when the crossfade starts, and keep track along with beatmatching, so that you get a smooth transition and the next track plays at its original tempo, keeping both songs in beat sync during the fade.  
+By default AutoDJ has a master deck and when sync is enabled, will slide down the tempo of the next track to meet the current.  Instead, I wanted the behaviour where all tracks play at their native rate, but "rate match" when the crossfade starts, matching rates along with beatmatching through the crossfade, so that you get a smooth transition and the next track ends up playing at its original tempo.
 
-The script optionally also supports syncing lights via sending a MIDI "beat note".  Whilst Mixxx ships with a "MIDI for Light" script to do the same, I found it failed at higher BPM and wasn't tuneable for any system latencies (especially if you run your fixtures on another device).
+The script optionally also supports syncing lights via sending a MIDI "beat note".  Whilst Mixxx ships with a "MIDI for Light" script to do the same, I found it failed at higher BPM and wasn't tuneable for any system latencies (especially if you run your fixtures on another device).  My implementation also allows for half/full beat timing and also to skip a beat if the BPM is over a user set threshold.
+
+## Feature summary
+Many of these can be enabled/disabled or changed via the Mixxx menu Options -> Preferences -> Controller:
+- Tempo (rate) and beat match both tracks through crossfade
+- Ensure all tracks play at their intended rate (once crossfade is finished)
+- Slowly fade out the bass of the outgoing track (allowing the incoming to be dominant)
+- Ramp up a bass boost to the incoming track (with a limit) for bass weak tracks
+- Send a beat note via MIDI to connected lighting software
+- Set whether the half (down) or up (full) beat is used as for light sync when sending beats to lighting software (default and on a per track basis)
+- Skip a beat if the BPM threshold is reached
+- Skip tracks if not within a BPM tolerance/range (to avoid jumping from a very slow to fast track or vice-versa)
+- Set the number of tracks to skip if a track within BPM tolerance is not found
+- Set a default mid/high frequency cut or boost
 
 ## How it works
-1. Enable AutoDJ and it will start to play
-2. When AutoDJ starts the crossfade to the next song
-3. The script starts by setting the incoming track to the same tempo as the outgoing track
-4. As the crossfade moves, increases (or decreases) both deck rates (speed/tempo) to slowly move to the target rate of the incoming track
-5. Whilst the tempo is moving, also maintains beat matches across both tracks, tuning throughout the fade by slightly bumping initially the incoming track, then outgoing track to align beats
-6. Optionally - the script will send a "beat" note on for the song playing on the current deck (prioritising decks during crossfade), so you get a smooth transition for your lighting as well
+AutoDJ is used to trigger the crossfade when the end of track or outro markers are reached as per normal
+1. When AutoDJ starts the crossfade to the next song
+2. The script starts by setting the incoming track to the same tempo as the outgoing track
+3. As the crossfade moves, the script increases (or decreases) both deck rates (speed/tempo) to slowly move to the target rate of the incoming track
+4. Whilst the tempo is moving, also maintains beat matching across both tracks, tuning throughout the fade by slightly bumping initially the incoming track, then outgoing track to align beats
+5. Optionally - the script will send a "beat" note on for the song playing on the current deck (prioritising decks during crossfade), so you get a smooth transition for your lighting as well
 
 ## Recommended AutoDJ / mixxx settings
 Setup Mixxx as follows (tested on v.2.5.6):
