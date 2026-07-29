@@ -13,7 +13,7 @@ Many of these can be enabled/disabled or changed via the Mixxx menu Options -> P
 - Slowly fade out the bass of the outgoing track (allowing the incoming to be dominant)
 - Ramp up a bass boost to the incoming track (with a limit) for bass weak tracks
 - Send a beat note via MIDI to connected lighting software
-- Set whether the half (down) or up (full) beat is used as for light sync when sending beats to lighting software (default and on a per track basis)
+- Set whether the half (down) or up (full) beat is used as for light sync when sending beats to lighting software (default and [on a per track basis](./switch_beat/README.md))
 - Skip a beat if the BPM threshold is reached
 - Skip tracks if not within a BPM tolerance/range (to avoid jumping from a very slow to fast track or vice-versa)
 - Set the number of tracks to skip if a track within BPM tolerance is not found
@@ -43,7 +43,7 @@ Setup Mixxx as follows (tested on v.2.5.6):
 ## Installation
 Mixxx uses MIDI controllers to "plug in" and either operate Mixxx functions or augment them with processing.  The script here is run under a "virtual" MIDI device/controller.  The following steps describe how to setup the controller, install the script (.js and .xml) then select the controller so it is activated.  
 
-First, copy the .js and adjacent *.xml from this repo into your user's configuration directory (On Linux, under /home/your_user, eg: home/your_user/.mixxx/controllers).  
+First, copy the .js and adjacent *.xml from this repo into your user's configuration directory (On Linux, under /home/your_user, eg: /home/your_user/.mixxx/controllers).  
 
 There are 2 ways to setup the script, depending on whether you want just beat matching or beat matching + lighting control (via sending a MIDI signal to software controlling lighting fixtures).  Choose one of the following (the first is the easiest).
 
@@ -51,7 +51,9 @@ There are 2 ways to setup the script, depending on whether you want just beat ma
 1. Go into Mixxx Options -> Preferences -> Controllers
 2. Select "Midi Through Port-0" and in the drop down, select "beatItAutoDJ"
 3. Check the "Enabled" checbox then click "Ok"
-4. Start/Enable AutoDJ.  When you start AutoDJ (enable button on the main Mixxx window), both beat matching and a MIDI "beat note" will be sent out the Midi through port  
+4. Start/Enable AutoDJ.  When you start AutoDJ (enable button on the main Mixxx window), both beat matching and a MIDI "beat note" will be sent out the Midi through port
+
+Some tracks look better when the lights flash on the half not full (beatmarker) grid set by Mixxx.  See [switch_beat](./switch_beat/README.md) if you want to enable this.
 
 ### Beatmatching only - VirMIDI 1-0 controller
 
