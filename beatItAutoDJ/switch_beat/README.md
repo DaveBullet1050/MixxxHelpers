@@ -6,6 +6,12 @@ Mixxx beat grids sometimes align to the upbeat or the downbeat.  The problem is,
 
 Instead, these scripts (for Linux Mixxx installations) monitor for track changes in Mixxx, check a database for whether half or full (grid aligned beat) should be used when sending a beat signal (via MIDI port) to the connected lighting software (e.g. QLC+).  
 
+## Dependencies
+The scripts rely on 2 packages (Arch Linux installation assumed):  
+```
+pacman -S sendmidi wmctrl
+```  
+
 ## Installation
 1. Copy the contents of this folder to /usr/local/bin (or anywhere you want to deploy)  
 2. Either run script or deploy as a service:  
