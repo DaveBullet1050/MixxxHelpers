@@ -4,8 +4,8 @@ function beatItAutoDJ() {}
 
 /*
 	beatItAutoDJ
-	License: GPLv2 or GPLv3, at your discretion and risk
-	 Author: Dave Bullet, 2026-07-08
+	License: GPLv2 or GPLv3, at your discretion and risk (but above all, have fun!)
+	 Author: Dave Bullet, 2026-07-26
 	    	Credit to: Sophia Herzog, 2016-2017, Stephen Larroque, 2021 (original script and lowbass transition option)
 	 Change history:
 	 	v0.1 - 2026-06-30 - Initial version
@@ -22,8 +22,20 @@ function beatItAutoDJ() {}
 		v0.5 - 2026-07-24 - Added ability to enable sending the beat over the active Midi Through channel with a configurable lead time
 							to allow for platform specific latencies.
 						  - Added all user configuration options to the XML to enable setting via Mixxx UI
+		v0.6 - 2026-07-29 - Added half beat support, that is play on the "downbeat" halfway between beats in the beatgrid.  I found
+							Mixxx often analysed tracks so the beat grid is on the upbeat, not downbeat.  Can be set via Mixxx UI alongside other settings
+						  - Added support for a "track DB" of preferred half or full beat settings (per artist-track).  This is optional, but allows
+							the system to switch automatically during the cross fade between half/full beat tracking on a per song basis.  This means you don't
+							need to manually re-align beatgrids.  This works via an external shell script, monitoring for Mixxx track change, then looking up the DB
+						  - Added another shell script to set the preferred full / half beat alignment for a specific track.  This adds to the "database" and sends an immediate
+						    change MIDI signal to this script (for immediate effect).  Can be called via SSH etc.., parameterised with "half" or "full" as desired
+						  - Changed beat pulse time to be half the beat duration.  Fast BPM tracks therefore flash quicker than slower ones.
+						  - Added a "Skip a beat when track over set BPM", so that every second beat sends a MIDI beat signal for tracks over the specified BPM.  This
+						    blends in, based on current effective BPM, analysed during the crossfade
+						  - Fixed bass fade and boost so they are decoupled.  Now neither, either or both can be used (previously fade level had to be set to enable boost).
+						    Increased fade by order of 10 so in 0.1 increments (not 0.01)
 
-	 Tested with Mixxx version: v.2.5.6
+		Tested with Mixxx version: v.2.5.6 and QLC+ 5.2.2
 
 	Overview:
 	---------
@@ -34,25 +46,28 @@ function beatItAutoDJ() {}
 
 // User Variables
 // ==============
-// You can change these at any time (via the Mixxx UI). Changes via the ui are stored in your ~/.mixxx/mixxx.cfg.
+// You can change these at any time (via the Mixxx UI). Overrides to the .XML values you make via the UI are stored in your ~/.mixxx/mixxx.cfg.
 // Read the Github README (link above) for an explanation of each, or hover over the setting in the preferences dialogue for an explanation.
 
 var beatMatch = engine.getSetting("beatMatch");
 var bpmTolerance = engine.getSetting("bpmTolerance");
 var maxBpmToleranceSkips = engine.getSetting("maxBpmToleranceSkips");
-var bassChangeRate = engine.getSetting("bassChangeRate");
+var bassChangeRate = 0.0;
+bassChangeRate = Number(engine.getSetting("bassChangeRate"));
 var bassBoost = engine.getSetting("bassBoost");
 var maxBassBoost = engine.getSetting("maxBassBoost");
 var midHighLevel = engine.getSetting("midHighLevel");
-var bpmLeadTime = engine.getSetting("bpmLeadTime");
+var bpmLeadTimeDefault = engine.getSetting("bpmLeadTime");
+var skipBeatBpmDefault = engine.getSetting("skipBeatBpm");
 var midiChannel = engine.getSetting("midiChannel");
+var halfBeatDefault = engine.getSetting("halfBeat");
 
 /*
 Default settings when previously script (rather than XML/UI) driven:
-var bpmTolerance = true;		
+var beatMatch = true;		
 var bpmTolerance = 0;		
 var maxBpmToleranceSkips = 5;
-var bassChangeRate = 0.01;
+var bassChangeRate = 0.1;
 var bassBoost = false;
 var maxBassBoost = 2.0;
 var midHighLevel = 1.0;
@@ -72,18 +87,23 @@ var debug = false;			// Set to true to see console output (Developer Tools -> Lo
 */
 
 // Working globals - don't change/edit these
-var crossFaderConnection, channel1TrackLoaded, channel2TrackLoaded
+let bpmLeadTime = 0;
+bpmLeadTime = Number(bpmLeadTimeDefault);
+let halfBeat = halfBeatDefault;
+let skipBeatBpm = 0;
+skipBeatBpm = Number(skipBeatBpmDefault);
+
+var crossFaderConnection, channel1TrackLoaded, channel2TrackLoaded;
 var fadingActive = false;
-var remainingIterations = 0, recheckBeat = 0;
-var beatDelta;
+var recheckBeat = 0, skippingBeat;
 var currDeck, nextDeck, currChannel, nextChannel, ndRateRange, cdRateRange, fadeProgress, fOrB, isEvaluating;
 var ndRateDelta, ndNewRate, cdRateDelta, cdNewRate, cdBeatDistance, ndBeatDistance, phaseGap, currSkips;
 var cdFileBPM, ndFileBPM, ndTargetRate, ndRateStepSize, cdTargetRate, cdRateStepSize, fadeStart;
-var currChannelEq,checkTrackLoadedTimer, bassZeroed, trackLoaded, cdFilterLow;
+var currChannelEq,checkTrackLoadedTimer, bassReset, trackLoaded, cdLowFilter;
 var mainChannel, adjChannel, nextChannelEq, currVuMeter, maxVuMeter, boostCounter, applyBoostId = 0;
-var bassBoostInit, setBassAndMonitor, ndFilterLow, maxBassToSet, firstBpmAdjust;
-var beatProcessed, prevBeatDistance = 0;
-var channel1BeatDistance, channel2BeatDistance, beatSlope, beatIntercept;
+var bassBoostInit, setBassAndMonitor, ndFilterLow, maxBassToSet = 0.0, firstBpmAdjust;
+var beatProcessed, prevBeatDistance = 0, midiInputHandler, newLowFilter = 0;
+var channel1BeatDistance, channel2BeatDistance, beatSlope, beatIntercept, startMarker, endMarker;
 
 beatItAutoDJ.init = function() {
 	// Initialise the script.  Enable options to help beat matching
@@ -114,6 +134,8 @@ beatItAutoDJ.init = function() {
 	if (bpmLeadTime > 0) {
     	channel1BeatDistance = engine.makeConnection("[Channel1]", "beat_distance", beatItAutoDJ.onBeatDistance);
     	channel2BeatDistance = engine.makeConnection("[Channel2]", "beat_distance", beatItAutoDJ.onBeatDistance);
+		// For handling notes
+		// midiInputHandler = midi.makeInputHandler(0x90, 0x01, beatItAutoDJ.onBeatChange);
 	}
 };
 
@@ -125,6 +147,7 @@ beatItAutoDJ.shutdown = function() { // Called by Mixxx - cleanup engine connect
 
 	if (channel1BeatDistance) channel1BeatDistance.disconnect();
 	if (channel2BeatDistance) channel2BeatDistance.disconnect();
+	if (midiInputHandler) midiInputHandler.disconnect();
 };
 
 beatItAutoDJ.debug = function(message) {
@@ -173,7 +196,7 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 		// Align the next deck to the current deck speed since the current deck has the dominant volume (start of fade).
 		// We'll then slowly increase/decrease the rate of both decks (toward the target) as the crossfader moves
 		engine.setValue(nextChannel, "rate", ndTargetRate);
-		bassZeroed = false;
+		bassReset = false;
 		recheckBeat = 0;
 		bassBoostInit = false;
 		if (applyBoostId !== 0) engine.stopTimer(applyBoostId);
@@ -237,7 +260,6 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 		// so we normalise it to within 1/2 a beat and "flip" the phase adjustment.  This stops large > 0.7 phase adjustments in the wrong direction
 		if (Math.abs(phaseGap) > 0.5) {
 			// Shift the phase closer to zero by 1/2 a beat
-//			beatItAutoDJ.debug("phaseGap raw: " + phaseGap);
 			// If we are closer to the next beat, then reduce the jump by shifting a smaller beat step in the opposite direction
 			if (phaseGap > 0) {
 				fOrB = "forward";
@@ -246,11 +268,9 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 				fOrB = "backward";
 				phaseGap = 1 + phaseGap;
 			}
-//			beatItAutoDJ.debug("phaseGap adjusted: " + phaseGap);
 		} else {
 			// Otherwise, we are within ~1/2 a beat so just pull the other track back (if advanced) or forward (if behind)
 			fOrB = (phaseGap > 0) ? "backward" : "forward";
-//			beatItAutoDJ.debug("phaseGap close: " + phaseGap);
 		} 
 
 		phaseGap = Math.abs(phaseGap);
@@ -275,20 +295,26 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 	}
 	recheckBeat --;
 
-	// FADE OUT CURRENT TRACK BASS
-	// ===========================
-	if (!bassZeroed && bassChangeRate > 0) {
-		cdFilterLow = engine.getValue(currChannelEq, "parameter1");
-		if (cdFilterLow > 0) {
-			if (cdFilterLow - bassChangeRate < 0) {
-				engine.setValue(currChannelEq, "parameter1", 0)
-				bassZeroed = true;
-			} else {
-				// If bassBoost is on, the current track may be boosted more, so we'll increase the rolloff rate by
-				// the max boost value
-				engine.setValue(currChannelEq, "parameter1", cdFilterLow - (((cdFilterLow > 1.0) ? 2 : 1) * bassChangeRate));
-			}
+	// REDUCE OR FADE BASS (if either is endabled)
+	// ===========================================
+	if (!bassReset && (bassBoost || (bassChangeRate > 0))) {
+		cdLowFilter = engine.getValue(currChannelEq, "parameter1");
+		if (cdLowFilter >= 1.0) {
+				// If we have fade as well as boost, we'll increase the rolloff rate in the boost range to get through the fade in time
+				newLowFilter = cdLowFilter - ((bassChangeRate == 0) ? 0.01 : (bassChangeRate / 10 * 2))
+		} else {
+				newLowFilter = cdLowFilter - (bassChangeRate / 10);
 		}
+
+		if ((newLowFilter < 0) && (bassChangeRate > 0)) {
+			newLowFilter = 0;
+			bassReset = true;
+		}
+		if ((newLowFilter < 1.0) && (bassChangeRate == 0)) {
+			newLowFilter = 1.0;
+			bassReset = true;
+		}
+		engine.setValue(currChannelEq, "parameter1", newLowFilter);
 	}
 
 	// BASS BOOST (IF ENABLED)
@@ -307,7 +333,7 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 	}
 
 	// Check if crossfader has reached the other side. If so, reset fading and bass level for next track change
-	fadingActive = Math.abs(value) == 1 ? false : true;
+	fadingActive = (Math.abs(value) == 1) ? false : true;
 	if (!fadingActive && bassChangeRate > 0) {
 		engine.setValue(currChannelEq, "parameter1", 1);
 	}
@@ -337,7 +363,7 @@ beatItAutoDJ.applyBassBoost = function() {
 		}
 		ndFilterLow = engine.getValue(nextChannelEq, "parameter1");
 		if (maxBassToSet > ndFilterLow  && (boostCounter % 2 === 0)) {
-			engine.setValue(nextChannelEq, "parameter1", ndFilterLow + bassChangeRate);
+			engine.setValue(nextChannelEq, "parameter1", ndFilterLow + 0.01);
 		}
 	} else {
 		if (applyBoostId !== 0) engine.stopTimer(applyBoostId);
@@ -428,18 +454,27 @@ beatItAutoDJ.onTrackLoaded = function(value, group, key) {
 
 beatItAutoDJ.onBeatDistance = function (value, group, control) {
 	/*
-		I found the Midi for light would skip beats when relying on beat_active
+		I found the "Midi for light" controller script would skip beats when relying on beat_active
 		signals for fast (> 150bpm) tracks.  This algorithm instead looks at beat distance and schedules the beat signal to
-		be sent with an (optional) configured amount of lead time (which can be none for immediate play).  This allows for setups where the lighting software
+		be sent with an (optional) configured amount of lead time (which can be < 5msec for immediate play).  This allows for setups where the lighting software
 		may be running over a network or similar with unavoidable delay, hence a lead time allow the beat to send ahead of the audio
-		reaching the beat, thus achieving "sync".  A bpmLeadTime setting < 5 is "run immediately without lead time" when the beat arrives
+		reaching the beat, thus achieving "sync".
 		
 		The timing of this event is pretty much random, ~every 20msec
-		So... when we are over halfway (0.5) to the beat (1.0), we'll sleep for the bpmLeadTime configured, 
-		fire the beat, sleep for a rest interval then turn it off
+		So... when we are over halfway (0.4 for a full beat or 0.9 when tracking a half beat), we'll sleep for the bpmLeadTime configured, 
+		fire the beat, sleep for a rest interval then turn it off (allowing a pulse duration of half a bar)
 	*/
 	// Use the primary channel set in the crossfade (if set) so we don't observe both channels triggering a beat during any crossfade
 	if (mainChannel && (mainChannel !== group)) return;
+
+	// Work out if we are playing this song to the tracked beat or half beat, as might be the case where the beatgrid is on the upbeat
+	// and we want beat pulses on the down(half) beat
+	if (halfBeat) {
+		value = (0.5 + value) % 1.0;
+		//var beatMarker = 0.5;
+	} else {
+		//var beatMarker = 1.0;
+	}
 
 	// We abort if either we've already processed the current beat OR we haven't yet reached the halfway mark to schedule the next beat
 	if (beatProcessed || (value < 0.4)) {
@@ -456,31 +491,110 @@ beatItAutoDJ.onBeatDistance = function (value, group, control) {
 
 	// Calculate lead time requested
 	var currBPM = engine.getValue(group, "bpm");
+
+	// If the current track is over the skipBeatBpm threshold, then see if we are on the skip beat, if so, do nothing
+	if ((skipBeatBpm > 0) && (currBPM > skipBeatBpm) && !skippingBeat) {
+		skippingBeat = true;
+		return;
+	}
+
 	var msecsPerBeat = (60 / currBPM * 1000);
 	var msecsToNextBeat = msecsPerBeat * (1.0 - value);
 	var sleepToBeat = msecsToNextBeat - bpmLeadTime;
-	beatItAutoDJ.debug("beat_distance :" + value + " bpm: " + currBPM + " bpmLeadTime: " + bpmLeadTime + " msecsPerBeat: " +
-					msecsPerBeat + " msecsToNextBeat: " + msecsToNextBeat + " sleepToBeat: " + sleepToBeat);
+/*	beatItAutoDJ.debug("beat_distance :" + value + " bpm: " + currBPM + " bpmLeadTime: " + bpmLeadTime + " msecsPerBeat: " +
+					msecsPerBeat + " msecsToNextBeat: " + msecsToNextBeat + " sleepToBeat: " + sleepToBeat +
+					" halfBeat: " + halfBeat + " skippingBeat: " + skippingBeat);
+*/
 
 	// If the lead time is minimal, play immediately, otherwise sleep!  Either way, we'll send a beat signal, more or less at beat_distance = 1.0
 	if (sleepToBeat < 5) {
+		var flashDuration = (skippingBeat) ? msecsPerBeat : (msecsPerBeat / 2);
 		midi.sendShortMsg(0x8F + midiChannel, 0x32, 0x64); // note D (50) on with value 64
 
-		engine.beginTimer(((-2 * currBPM) + 400), function() {
+		engine.beginTimer(flashDuration, function() {
 			midi.sendShortMsg(0x8F + midiChannel, 0x32, 0x0); // note D (50) on with value 0
 			midi.sendShortMsg(0x7F + midiChannel, 0x32, 0x0); // note D (59) off with value 0
 		}, true);
 	} else {
+		var flashDuration = (skippingBeat) ? msecsPerBeat : (msecsPerBeat / 2);
 		engine.beginTimer(sleepToBeat, function() {
 
 			midi.sendShortMsg(0x8F + midiChannel, 0x32, 0x64); // note D (50) on with value 64
 
 			// This turns off the note (thus stops the beat signal).  The calculation makes the duration relative to the songs BPM.
 			// Fast songs will have a shorter wait period, slower songs will be longer.  The goal is roughly half time on / off per beat
-			engine.beginTimer(((-2 * currBPM) + 400), function() {
+			engine.beginTimer(flashDuration, function() {
 				midi.sendShortMsg(0x8F + midiChannel, 0x32, 0x0); // note D (50) on with value 0
 				midi.sendShortMsg(0x7F + midiChannel, 0x32, 0x0); // note D (59) off with value 0
 			}, true);  // One shot timer
 		}, true); // One shot timer
 	}
+	skippingBeat = false;
+}
+
+// Used for incoming midi notes. Not currently implemented
+beatItAutoDJ.onBeatChange = function(channel, control, value, status) {
+	halfBeat = (value == 0) ? true : false;
+	//beatItAutoDJ.debug("incoming midi value: " + value + " halfBeat: " + halfBeat);
+}
+
+// Used for incoming sysex hex control strings.  Refer switch_beat.sh and send_midi_signal.sh which trigger the required full/half beat change per track
+// sending a MIDI command string to this function
+beatItAutoDJ.incomingData = function(data, _length) {
+	beatItAutoDJ.debug("incoming midi sysex: " + data + " length: " + _length);
+
+	// Ignore first code (status = 0xF0)
+
+	// First byte = is beat marker to use
+	// 0 = use default, 1 = half beat, 2 = full beat (beat grid aligned)
+	switch (data[1]) {
+		case 0:
+			halfBeat = halfBeatDefault;
+			break;
+		case 1:
+			halfBeat = true;
+			break;
+		case 2:
+			halfBeat = false;
+			break;
+	}
+	
+	beatItAutoDJ.debug("halfBeat: " + halfBeat);
+
+	// Rest of string (up to last char) is the bpmLeadTime for the track
+	var newBpmLead = "";
+	for (let i = 2; i < _length - 1; i++) {
+		newBpmLead = newBpmLead + data[i];
+	}
+
+	if (newBpmLead == "") {
+		bpmLeadTime = Number(bpmLeadTimeDefault);
+	}
+	else {
+		bpmLeadTime = Number(newBpmLead);
+	}
+	beatItAutoDJ.debug("newBpmLead: " + newBpmLead);
+
+/*	// Check if it's our specific Track Title SysEx payload
+    // Example Header: [0xF0, 0x00, 0x20, 0x7F]
+    if (data[0] === 0xF0 && data[1] === 0x00 && data[2] === 0x20 && data[3] === 0x7F) {
+        
+        // Extract the characters (ignoring the 4-byte header and 1-byte footer 0xF7)
+        var textBytes = data.slice(4, length - 1);
+        
+        // Convert array of byte integers back to a standard JavaScript string
+        var trackTitle = "";
+        for (var i = 0; i < textBytes.length; i++) {
+            trackTitle += String.fromCharCode(textBytes[i]);
+        }
+        
+        // Success! Your Mixxx script now holds the live track name string natively
+        beatItAutoDJ.debug("Mixxx Script Captured Track Name: " + trackTitle);
+        
+        // Execute your local script conditional logic right here
+        if (trackTitle.indexOf("Intro") !== -1) {
+             // Do something specific in Mixxx for intro tracks...
+        }
+    }
+		*/
 }

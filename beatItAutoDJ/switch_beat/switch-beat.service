@@ -1,0 +1,15 @@
+[Unit]
+Description=Start switch beat monitoring service
+After=local-fs.target
+[Service]
+Type=simple
+ExecStart=switch_beat.sh
+# Restart the service whenever it stops, even if exiting successfully (doesn't apply if a systemd stop command i
+s issued)
+Restart=always
+# Check if running every 10 seconds and if not restart
+RestartSec=10
+# Don't limit the number of restarts tried (keep going every 10 seconds as above)
+StartLimitIntervalSec=0
+[Install]
+WantedBy=multi-user.target

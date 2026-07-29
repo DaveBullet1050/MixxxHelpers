@@ -49,11 +49,11 @@
                     precision="2"
                     min="0.0"
                     max="1.0"
-                    step="0.01"
-                    default="0.01"
+                    step="0.1"
+                    default="0.0"
                     label="How quickly to fade outgoing track bass during crossfade">
                     <description>
-                        If = 0, no bass rolloff is performed.  If &gt; 0 = the rate at which the curent track's bass frequencies will be rolled off in the crossfade, allowing the incoming track's bass to dominate.  Having only one track play bass sounds nicer. 0.01 provides a gradual roll off for a 15 second crossfade / transition.  A max value of 1.0 instantly snaps the bass off at the start of crossfade
+                        If = 0, no bass rolloff is performed.  If &gt; 0 = the rate at which the curent track's bass frequencies will be rolled off in the crossfade, allowing the incoming track's bass to dominate.  Having only one track play bass sounds nicer. 0.1 provides a gradual roll off for a 20 second crossfade / transition.  A max value of 1.0 instantly snaps the bass off at the start of crossfade
                     </description>
                 </option>
                 <option
@@ -101,10 +101,10 @@
                     min="0"
                     max="500"
                     step="5"
-                    default="0"
-                    label="Maximum lead time for sending beat over MIDI channel">
+                    default="100"
+                    label="Beat signal activation and lead time">
                     <description>
-                       Time (in microseconds) to send a MIDI beat signal (e.g. to lighting software) "ahead" of the beat. If = 0 - no signal is sent. If &gt; 0, send a beat signal over the MIDI channel with no latency. If &gt; 5, lead the beat signal by the number of microseconds. This allows for any latency due to slow computer or off board lighting system with latent connection
+                       Activate sending MIDI beat signals.  Time (in milliseconds) to send a MIDI beat signal (e.g. to lighting software) "ahead" of the beat. If = 0 - no signal is sent. If between 0 and 5, send a beat signal over the MIDI channel with no latency. If &gt; 5, lead the beat signal by the number of milliseconds
                     </description>
                 </option>
                 <option
@@ -115,15 +115,48 @@
                     default="1"
                     label="MIDI channel to send beat over">
                     <description>
-                       MIDI channel to send beat information over (only used if bpmLeadTime 0)
+                       MIDI channel to send beat information over. This setting only applied if Beat signal activation and lead time &gt; 0
+                    </description>
+                </option>
+                <option
+                    variable="halfBeat"
+                    type="boolean"
+                    default="false"
+                    label="Whether a beat is sent on the BPM grid (false) or half / down beat (true)">
+                    <description>
+                        When Mixxx generates a beat grid, it may align to the upbeat. If most of your tracks align the downbeat to the middle of the beat grid, set this to true (half beat), otherwise false is align beats to the beat marker.  Can be overridden per track in the DB.  This setting only applied if Beat signal activation and lead time &gt; 0
+                    </description>
+                </option>
+                <option
+                    variable="skipBeatBpm"
+                    type="integer"
+                    min="0"
+                    max="200"
+                    step="5"
+                    default="0"
+                    label="Skip a beat when track over set BPM">
+                    <description>
+                       If an incoming track is over the BPM, skips sending a beat via MIDI.  Can be overridden per track in the DB. This setting only applied if Beat signal activation and lead time &gt; 0
                     </description>
                 </option>
             </row>
         </group>
     </settings>
-    <controller id="beatItAutoDJ">
-            <scriptfiles>
-                <file filename="beatItAutoDJ-scripts.js" functionprefix="beatItAutoDJ"/>
-            </scriptfiles>
+    <controller id="controller_beatItAutoDJ">
+        <scriptfiles>
+            <file filename="beatItAutoDJ-scripts.js" functionprefix="beatItAutoDJ"/>
+        </scriptfiles>
+        <controls>
+            <control> <!-- Handle timing the beat on full or half plus any lead time-->
+                <group>[Master]</group>
+                <key>beatItAutoDJ.incomingData</key>
+                <status>0xF0</status>
+                <options>
+                    <Script-Binding/>
+                </options>
+            </control>
+        </controls>
+        <outputs>
+        </outputs>
     </controller>
 </MixxxControllerPreset>
