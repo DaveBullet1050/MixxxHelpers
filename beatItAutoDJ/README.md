@@ -13,7 +13,7 @@ Many of these can be enabled/disabled or changed via the Mixxx menu Options -> P
 - Slowly fade out the bass of the outgoing track (allowing the incoming to be dominant)
 - Ramp up a bass boost to the incoming track (with a limit) for bass weak tracks
 - Send a beat note via MIDI to connected lighting software
-- Set whether the half (down) or up (full) beat is used as for light sync when sending beats to lighting software (default and on a per track basis)
+- Set whether the half (down) or up (full) beat is used as for light sync when sending beats to lighting software (default and [on a per track basis](./switch_beat/README.md))
 - Skip a beat if the BPM threshold is reached
 - Skip tracks if not within a BPM tolerance/range (to avoid jumping from a very slow to fast track or vice-versa)
 - Set the number of tracks to skip if a track within BPM tolerance is not found
@@ -43,7 +43,7 @@ Setup Mixxx as follows (tested on v.2.5.6):
 ## Installation
 Mixxx uses MIDI controllers to "plug in" and either operate Mixxx functions or augment them with processing.  The script here is run under a "virtual" MIDI device/controller.  The following steps describe how to setup the controller, install the script (.js and .xml) then select the controller so it is activated.  
 
-First, copy the .js and adjacent *.xml from this repo into your user's configuration directory (On Linux, under /home/your_user, eg: home/your_user/.mixxx/controllers).  
+First, copy the .js and adjacent *.xml from this repo into your user's configuration directory (On Linux, under /home/your_user, eg: /home/your_user/.mixxx/controllers).  
 
 There are 2 ways to setup the script, depending on whether you want just beat matching or beat matching + lighting control (via sending a MIDI signal to software controlling lighting fixtures).  Choose one of the following (the first is the easiest).
 
@@ -51,7 +51,9 @@ There are 2 ways to setup the script, depending on whether you want just beat ma
 1. Go into Mixxx Options -> Preferences -> Controllers
 2. Select "Midi Through Port-0" and in the drop down, select "beatItAutoDJ"
 3. Check the "Enabled" checbox then click "Ok"
-4. Start/Enable AutoDJ.  When you start AutoDJ (enable button on the main Mixxx window), both beat matching and a MIDI "beat note" will be sent out the Midi through port  
+4. Start/Enable AutoDJ.  When you start AutoDJ (enable button on the main Mixxx window), both beat matching and a MIDI "beat note" will be sent out the Midi through port
+
+Some tracks look better when the lights flash on the half not full (beatmarker) grid set by Mixxx.  See [switch_beat](./switch_beat/README.md) if you want to enable this.
 
 ### Beatmatching only - VirMIDI 1-0 controller
 
@@ -79,25 +81,27 @@ Select beatItAutoDJ and click "Enabled"
 Change these via the Options -> Preferences -> Controllers page (selecting the controller you configured above):
 
 ### Beat and track matching specific parameters
-| Parameter | Default value | Description |
-| :---: | :---: | --- |
-| beatMatch | true | If true, adjusts the beat to synchronise along with rate matching from current to next track. If you just want rate (tempo) matching and without beat alignment, set this to false |
-| bpmTolerance | 0 | If > 0, this defines the +/- difference allowed in BPM between adjacent tracks.  i.e. if the current track is 127 BPM and next track to play is 137 BPM a bpmTolerance of 10 would match these.  The purpose is to not select tracks with too big a bpm difference.  Although this poses no problem for the script, the speed change may sound funny to listeners.  If set to zero, no BPM comparison is performed (ie. every track is played in order) |
-| maxBpmToleranceSkips | 5 | Only applies if bpmTolerance > 0.  This is the maximum number of consecutive tracks that will be skipped outside the bpmTolerance, before aborting and selecting whatever track is next.  This stops infinite loop issues |
+| UI Label | In script | Default value | Description |
+| :---: | :---: | :---: | --- |
+| Enable beat matching during crossfade | beatMatch | true | If true, adjusts the beat to synchronise along with rate matching from current to next track. If you just want rate (tempo) matching and without beat alignment, set this to false |
+| Range of BPM variation tolerated between tracks | bpmTolerance | 0 | If > 0, this defines the +/- difference allowed in BPM between adjacent tracks.  i.e. if the current track is 127 BPM and next track to play is 137 BPM a bpmTolerance of 10 would match these.  The purpose is to not select tracks with too big a bpm difference.  Although this poses no problem for the script, the speed change may sound funny to listeners.  If set to zero, no BPM comparison is performed (ie. every track is played in order) |
+| Maximum number of tracks to skip | maxBpmToleranceSkips | 5 | Only applies if bpmTolerance > 0.  This is the maximum number of consecutive tracks that will be skipped outside the bpmTolerance, before aborting and selecting whatever track is next.  This stops infinite loop issues |
 
 ### Frequency response customisation
-| Parameter | Default value | Description |
-| :---: | :---: | --- |
-| bassChangeRate | 0.01 | If = 0, no bass rolloff is performed.  If > 0 = the rate at which the curent track's bass frequencies will be rolled off in the crossfade, allowing the incoming track's bass to dominate.  Having only one track play bass sounds nicer. 0.01 provides a gradual roll off for a 15 second crossfade / transition.  A max value of 1.0 instantly snaps the bass off at the start of crossfade |
-| bassBoost | false | If true, the script analyses the incoming track to see if it has sufficient headroom to increase just the bass.  Think of it as "bass normalisation" across tracks.  Some tracks - especially 60s/70s did not mix with an emphasis on bass.  This setting will ramp up the bass gradually to a safe (non-clipping) level after the crossfade, after looking at peak VU (boost only applied if peak vu <= 0.8).  If false, bass is untouched |
-| maxBassBoost | 2.0 | Only applies if bassBoost = true.  This is the maximum the "L" knob will be turned if a track has headroom for increasing bass.  This value is a safety to ensure it doesn't get turned too high.  If too much bass is being applied (and you still want some bass boost), reduce this to 1.5 or so |
-| midHighLevel | 1.0 | 1.0 = flat.  Adjust this if you want to boost (or reduce) the mid and high frequencies. 0.75 is a good value to try if you find your setup harsh/bright |
+| UI Label | In script | Default value | Description |
+| :---: | :---: | :---: | --- |
+| How quickly to fade outgoing track bass during crossfade | bassChangeRate | 0.01 | If = 0, no bass rolloff is performed.  If > 0 = the rate at which the curent track's bass frequencies will be rolled off in the crossfade, allowing the incoming track's bass to dominate.  Having only one track play bass sounds nicer. 0.01 provides a gradual roll off for a 15 second crossfade / transition.  A max value of 1.0 instantly snaps the bass off at the start of crossfade |
+| Ramp up bass on weak bass tracks | bassBoost | false | If true, the script analyses the incoming track to see if it has sufficient headroom to increase just the bass.  Think of it as "bass normalisation" across tracks.  Some tracks - especially 60s/70s did not mix with an emphasis on bass.  This setting will ramp up the bass gradually to a safe (non-clipping) level after the crossfade, after looking at peak VU (boost only applied if peak vu <= 0.8).  If false, bass is untouched |
+| Safety maximum to ramp up bass (if enabled) | maxBassBoost | 2.0 | Only applies if bassBoost = true.  This is the maximum the "L" knob will be turned if a track has headroom for increasing bass.  This value is a safety to ensure it doesn't get turned too high.  If too much bass is being applied (and you still want some bass boost), reduce this to 1.5 or so |
+| Mid and high frequency playback level | midHighLevel | 1.0 | 1.0 = flat.  Adjust this if you want to boost (or reduce) the mid and high frequencies. 0.75 is a good value to try if you find your setup harsh/bright |
 
 ### Lighting fixture synchronisation
-| Parameter | Default value | Description |
-| :---: | :---: | --- |
-| bpmLeadTime | 0 | Time (in microseconds) to send a MIDI beat signal (e.g. to lighting software) "ahead" of the beat. If = 0 - no signal is sent.  If > 0, send a beat signal over the MIDI channel with no latency. If > 5, lead the beat signal by the number of microseconds.  This allows for any latency due to slow computer or off board  lighting system with latent connection |
-| midiChannel | 1 | MIDI channel to send beat information over (only used if bpmLeadTime > 0) |
+| UI Label | In script | Default value | Description |
+| :---: | :---: | :---: | --- |
+| Beat signal activation and lead time | bpmLeadTime | 0 | Time (in microseconds) to send a MIDI beat signal (e.g. to lighting software) "ahead" of the beat. If = 0 - no signal is sent.  If > 0, send a beat signal over the MIDI channel with no latency. If > 5, lead the beat signal by the number of microseconds.  This allows for any latency due to slow computer or off board  lighting system with latent connection |
+| MDI channel to send beat over | midiChannel | 1 | MIDI channel to send beat information over (only applies if bpmLeadTime > 0) |
+| Whether a beat is sent on the BPM grid (false) or half / down beat (true) | halfBeat | false | When Mixxx generates a beat grid, it may align to the upbeat. If most of your tracks align the downbeat to the middle of the beat grid, set this to true (half beat), otherwise false is align beats to the beat marker.  Can be overridden per track in the DB. (only applies if bpmLeadTime > 0) |
+| Skip a beat when track over set BPM | skipBeatBpm | 0 | If an incoming track is over the BPM, skips sending a beat via MIDI.  Can be overridden per track in the DB. (only applies if bpmLeadTime > 0) |
 
 ## Other tips
 If you are playing Mixxx over VNC/Remote desktop and encounter CPU peaks/audio stutters, increase:  
