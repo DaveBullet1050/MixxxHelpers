@@ -79,16 +79,29 @@
                     </description>
                 </option>
                 <option
-                    variable="midHighLevel"
+                    variable="midLevel"
                     type="real"
                     precision="2"
                     min="0.0"
                     max="2.0"
                     step="0.05"
                     default="1.0"
-                    label="Mid and high frequency playback level">
+                    label="Mid frequency playback level">
                     <description>
-                        1.0 = flat. Adjust this if you want to boost (or reduce) the mid and high frequencies. 0.75 is a good value to try if you find your setup harsh/bright
+                        1.0 = flat. Adjust this if you want to boost (or reduce) the mid frequencies. 0.75 is a good value to try if you find your setup harsh/bright
+                    </description>
+                </option>
+                <option
+                    variable="highLevel"
+                    type="real"
+                    precision="2"
+                    min="0.0"
+                    max="2.0"
+                    step="0.05"
+                    default="1.0"
+                    label="High frequency playback level">
+                    <description>
+                        1.0 = flat. Adjust this if you want to boost (or reduce) the high frequencies. 0.75 is a good value to try if you find your setup harsh/bright
                     </description>
                 </option>
             </row>
@@ -113,7 +126,7 @@
                     min="1"
                     max="16"
                     default="1"
-                    label="MIDI channel to send beat over">
+                    label="MDI channel to send beat over">
                     <description>
                        MIDI channel to send beat information over. This setting only applied if Beat signal activation and lead time &gt; 0
                     </description>
@@ -136,7 +149,7 @@
                     default="0"
                     label="Skip a beat when track over set BPM">
                     <description>
-                       If an incoming track is over the BPM, skips sending a beat via MIDI.  Can be overridden per track in the DB. This setting only applied if Beat signal activation and lead time &gt; 0
+                       If an incoming track is over the BPM, skips sending a beat via MIDI.  This setting only applied if Beat signal activation and lead time &gt; 0
                     </description>
                 </option>
             </row>

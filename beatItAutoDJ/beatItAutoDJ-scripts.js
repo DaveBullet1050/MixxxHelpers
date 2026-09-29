@@ -33,7 +33,11 @@ function beatItAutoDJ() {}
 						  - Added a "Skip a beat when track over set BPM", so that every second beat sends a MIDI beat signal for tracks over the specified BPM.  This
 						    blends in, based on current effective BPM, analysed during the crossfade
 						  - Fixed bass fade and boost so they are decoupled.  Now neither, either or both can be used (previously fade level had to be set to enable boost).
-						    Increased fade by order of 10 so in 0.1 increments (not 0.01)
+						  - Increased fade by order of 10 so in 0.1 increments (not 0.01)
+		v0.7 - 2026-08-03 - Allowed for rate reversal where slider is flipped from -1 to 1 in settings
+						  - Fettled with the initial rate setting and rate tracking between tracks
+						  - Removed unused globals
+						  - Split mid frequency and high frequency levels into separate settings
 
 		Tested with Mixxx version: v.2.5.6 and QLC+ 5.2.2
 
@@ -56,7 +60,8 @@ var bassChangeRate = 0.0;
 bassChangeRate = Number(engine.getSetting("bassChangeRate"));
 var bassBoost = engine.getSetting("bassBoost");
 var maxBassBoost = engine.getSetting("maxBassBoost");
-var midHighLevel = engine.getSetting("midHighLevel");
+var midLevel = engine.getSetting("midLevel");
+var highLevel = engine.getSetting("highLevel");
 var bpmLeadTimeDefault = engine.getSetting("bpmLeadTime");
 var skipBeatBpmDefault = engine.getSetting("skipBeatBpm");
 var midiChannel = engine.getSetting("midiChannel");
@@ -73,6 +78,7 @@ var maxBassBoost = 2.0;
 var midHighLevel = 1.0;
 var bpmLeadTime = 100;
 var midiChannel = 1;
+var halfBeatDefault = false;
 */
 
 // User settings end here.  Venture below at your peril :)
@@ -96,14 +102,15 @@ skipBeatBpm = Number(skipBeatBpmDefault);
 var crossFaderConnection, channel1TrackLoaded, channel2TrackLoaded;
 var fadingActive = false;
 var recheckBeat = 0, skippingBeat;
-var currDeck, nextDeck, currChannel, nextChannel, ndRateRange, cdRateRange, fadeProgress, fOrB, isEvaluating;
-var ndRateDelta, ndNewRate, cdRateDelta, cdNewRate, cdBeatDistance, ndBeatDistance, phaseGap, currSkips;
-var cdFileBPM, ndFileBPM, ndTargetRate, ndRateStepSize, cdTargetRate, cdRateStepSize, fadeStart;
-var currChannelEq,checkTrackLoadedTimer, bassReset, trackLoaded, cdLowFilter;
+var currDeck, nextDeck, currChannel, nextChannel, fadeProgress, fOrB, isEvaluating;
+var ndRateDelta, ndNewRate, cdNewRate, cdBeatDistance, ndBeatDistance, phaseGap, currSkips;
+var cdFileBPM, ndFileBPM, cdTargetRate, fadeStart;
+var currChannelEq, bassReset, trackLoaded, cdLowFilter;
 var mainChannel, adjChannel, nextChannelEq, currVuMeter, maxVuMeter, boostCounter, applyBoostId = 0;
 var bassBoostInit, setBassAndMonitor, ndFilterLow, maxBassToSet = 0.0, firstBpmAdjust;
 var beatProcessed, prevBeatDistance = 0, midiInputHandler, newLowFilter = 0;
-var channel1BeatDistance, channel2BeatDistance, beatSlope, beatIntercept, startMarker, endMarker;
+var channel1BeatDistance, channel2BeatDistance;
+var rateRange, ndInitialRate, rateDir;
 
 beatItAutoDJ.init = function() {
 	// Initialise the script.  Enable options to help beat matching
@@ -117,10 +124,10 @@ beatItAutoDJ.init = function() {
 	engine.setValue("[Channel2]", "keylockMode", 0.0);
 
 	// Set mid / high rolloff
-	engine.setValue("[EqualizerRack1_[Channel1]_Effect1]", "parameter2", midHighLevel);
-	engine.setValue("[EqualizerRack1_[Channel1]_Effect1]", "parameter3", midHighLevel);
-	engine.setValue("[EqualizerRack1_[Channel2]_Effect1]", "parameter2", midHighLevel);
-	engine.setValue("[EqualizerRack1_[Channel2]_Effect1]", "parameter3", midHighLevel);
+	engine.setValue("[EqualizerRack1_[Channel1]_Effect1]", "parameter2", midLevel);
+	engine.setValue("[EqualizerRack1_[Channel1]_Effect1]", "parameter3", highLevel);
+	engine.setValue("[EqualizerRack1_[Channel2]_Effect1]", "parameter2", midLevel);
+	engine.setValue("[EqualizerRack1_[Channel2]_Effect1]", "parameter3", highLevel);
 
 	// Our script will beat match during the crossfade between decks.  Register the event, that way we do not waste CPU
 	// inbetween and have to check status etc... Mixxx will only call this when the cross fader is actually moved
@@ -156,12 +163,11 @@ beatItAutoDJ.debug = function(message) {
 
 beatItAutoDJ.onCrossFade = function(value, group, key) {
 	if (!fadingActive) {
+		beatItAutoDJ.debug("=================================================");
 		// First time at start of the crossfade.
 		// Determine the current deck being faded from.  <0 is the left deck, >= 0 is the right
 		currDeck = value < 0 ? 1 : 2;
 		nextDeck = currDeck == 1 ? 2 : 1;
-		beatItAutoDJ.debug("currDeck: " + currDeck);
-		beatItAutoDJ.debug("nextDeck: " + nextDeck);
 		currChannel = "[Channel"+currDeck+"]";
 		currChannelEq = "[EqualizerRack1_[Channel" + currDeck + "]_Effect1]";
 		nextChannel = "[Channel"+nextDeck+"]";
@@ -170,32 +176,30 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 		// Used to determine the relative rate increase/decrease to apply below (as a percentage away from fade start)
 		fadeStart = value < 0 ? -1.0 : 1.0;
 
-		// Get the speeds of the files loaded in each deck
+		// We need to set the next deck to the current decks speed.  We get the file BPM of each track
 		cdFileBPM = engine.getValue(currChannel, "file_bpm");
 		ndFileBPM = engine.getValue(nextChannel, "file_bpm");
-		beatItAutoDJ.debug("currDeck BPM: " + cdFileBPM);
-		beatItAutoDJ.debug("nextDeck BPM: " + ndFileBPM);
+		rateDir = engine.getValue(currChannel, "rate_dir");
 
-		// Calculate the total % shift in rate required to bring the target BPM down to match the current BPM.  We need
-		// to offset this by the rate range being set on the deck (via Options -> Decks -> Slider range) to find
-		// the correct relative rate value to the degree of slider movement.  90% in the Mixxx options allows the greatest BPM difference between tracks
-		ndRateRange = engine.getValue(nextChannel, "rateRange");
-		ndTargetRate = -1 * ((cdFileBPM - ndFileBPM) / ndFileBPM / ndRateRange);
+		// The range slider (Options -> Preferences -> Decks -> Slider Range) to find
+		// the correct relative rate value to the degree of slider movement to apply to the final rate setting for each deck
+		rateRange = engine.getValue(nextChannel, "rateRange");
 
-		// Keep within the bounds of the control
-		if (ndTargetRate > 1.0) ndTargetRate = 1.0;
-		if (ndTargetRate < -1.0) ndTargetRate = -1.0;
-		beatItAutoDJ.debug("ndTargetRate: " + ndTargetRate);
-
-		cdRateRange = engine.getValue(currChannel, "rateRange");
-		cdTargetRate = -1 * ((ndFileBPM - cdFileBPM) / cdFileBPM / cdRateRange);
-		if (cdTargetRate > 1.0) cdTargetRate = 1.0;
-		if (cdTargetRate < -1.0) cdTargetRate = -1.0;
-		beatItAutoDJ.debug("cdTargetRate: " + cdTargetRate);
-
-		// Align the next deck to the current deck speed since the current deck has the dominant volume (start of fade).
+		// Set the next deck to the current deck speed since the current deck has the dominant volume (start of fade).
 		// We'll then slowly increase/decrease the rate of both decks (toward the target) as the crossfader moves
-		engine.setValue(nextChannel, "rate", ndTargetRate);
+		ndInitialRate = ((cdFileBPM / ndFileBPM) - 1) / rateRange;
+		// Flip the Options -> Preferences -> Decks > Down increase tempo setting
+		ndInitialRate = ndInitialRate * ((rateDir == -1) ? -1 : 1);
+		// Keep within the bounds of the rate control
+		ndInitialRate = Math.max(-1.0, Math.min(1.0, ndInitialRate));
+		engine.setValue(nextChannel, "rate", ndInitialRate);
+
+		// Current deck will start at zero, but slowly move toward a faster (or slower) rate to match the next deck
+		// Work out that target which will be used in the crossfade
+		cdTargetRate = ((ndFileBPM / cdFileBPM) - 1) / rateRange;
+		cdTargetRate = cdTargetRate * ((rateDir == -1) ? -1 : 1);
+		cdTargetRate = Math.max(-1.0, Math.min(1.0, cdTargetRate));
+
 		bassReset = false;
 		recheckBeat = 0;
 		bassBoostInit = false;
@@ -207,23 +211,24 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 	// RATE RAMP UP / DOWN SECTION - BOTH DECKS
 	// ========================================
 
-	// Work out % through the fade.  We'll use this to work out what rate we need to be add for each deck
+	// Work out % through the fade.  We'll use this to work out what rate we need to inch each deck along (faster or slower)
 	fadeProgress = Math.abs(value - fadeStart) / 2.0;
 
 	// For standard Mixxx configuration, a positive rate (toward 1.0) is a slower tempo, whereas
-	// negative rate (toward -1.0) is faster
+	// negative rate (toward -1.0) is faster.  This script assumes the standard, if you invert the Mixxx settings, the speed will
+	// work in the wrong direction
 
 	// Adjust next deck rate - we're heading to zero from the initially set target rate
-	ndRateDelta = fadeProgress * ndTargetRate;
+	ndRateDelta = fadeProgress * ndInitialRate;
+
 	// Whether the target rate is negative (faster) or positive (slower), subtracting a delta will head to zero
-	ndNewRate = ndTargetRate - ndRateDelta;
+	ndNewRate = ndInitialRate - ndRateDelta;
 	engine.setValue(nextChannel, "rate", ndNewRate);
 
 	// Repeat for current deck, we'll slide this along with the next deck so they match tempo/rate
 	// For the current deck, we start at a zero rate, and head (up or down) to match the next deck
-	cdRateDelta = fadeProgress * cdTargetRate;
-	// Whether the rate is negative (go faster) or positive (slow down), adding the delta will head to target rate
-	cdNewRate = 0 + cdRateDelta;	
+	// based on how far we are through the fade
+	cdNewRate = (fadeProgress * cdTargetRate);
 	engine.setValue(currChannel, "rate", cdNewRate);
 
 	// BEATMATCH CHECK AND ADJUST SECTION
@@ -234,8 +239,8 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 		recheckBeat = 3;
 		// Snap the beat of the incoming track to the current
 
-		// We'll start adjusting the next channel, but after halfway, we'll align the current channel
-		// so we adjust the channel that is lesser in volume (making any glitches less obvious)
+		// We'll start adjusting the next channel since it is just fading in (low volume), but after halfway, we'll
+		// make any beat shifts if needed to the current channel as it becomes lesser in volume (making any glitches less obvious)
 
 		// Check if over halfway
 		if ((fadeStart * value) > 0 ) {
@@ -287,9 +292,10 @@ beatItAutoDJ.onCrossFade = function(value, group, key) {
 			case (phaseGap > 0.0468):
         		engine.setValue(adjChannel, "beatjump_0.0625_" + fOrB, 1);				
 				break;
-			case (phaseGap >= 0.01):
+			case (phaseGap >= 0.0156):
         		engine.setValue(adjChannel, "beatjump_0.03125_" + fOrB, 1);				
 				break;
+			// Anything less than 0.0156 isn't worth adjusting
 		}
 		firstBpmAdjust = false;
 	}
@@ -471,9 +477,6 @@ beatItAutoDJ.onBeatDistance = function (value, group, control) {
 	// and we want beat pulses on the down(half) beat
 	if (halfBeat) {
 		value = (0.5 + value) % 1.0;
-		//var beatMarker = 0.5;
-	} else {
-		//var beatMarker = 1.0;
 	}
 
 	// We abort if either we've already processed the current beat OR we haven't yet reached the halfway mark to schedule the next beat
